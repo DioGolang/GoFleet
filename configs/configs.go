@@ -11,6 +11,7 @@ type Conf struct {
 	DBName        string `mapstructure:"DB_NAME"`
 	WebServerPort string `mapstructure:"WEB_SERVER_PORT"`
 	GRPCPort      string `mapstructure:"GRPC_PORT"`
+	AMQPort       string `mapstructure:"AMQ_PORT"`
 }
 
 func LoadConfig(path string) (*Conf, error) {
