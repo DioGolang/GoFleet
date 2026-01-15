@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"github.com/DioGolang/GoFleet/configs"
 	"github.com/DioGolang/GoFleet/internal/application/usecase"
+	"github.com/DioGolang/GoFleet/internal/domain/event"
 	"github.com/DioGolang/GoFleet/internal/infra/database"
+	infraEvent "github.com/DioGolang/GoFleet/internal/infra/event"
 	"github.com/DioGolang/GoFleet/internal/infra/web"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	_ "github.com/lib/pq"
+	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"net/http"
 )
@@ -33,8 +36,48 @@ func main() {
 		panic(err)
 	}
 
+	//RabbiMQ
+	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
+		panic(err)
+	}
+	defer ch.Close()
+
+	_, err = ch.QueueDeclare(
+		"orders.created", // name
+		true,             // durable
+		false,            // delete when unused
+		false,            // exclusive
+		false,            // no-wait
+		nil,              // arguments
+	)
+	if err != nil {
+		panic(err)
+	}
+
+	err = ch.QueueBind(
+		"orders.created",
+		"orders.created",
+		"amq.direct",
+		false,
+		nil,
+	)
+	if err != nil {
+		panic(err)
+	}
+
 	orderRepository := database.NewOrderRepository(db)
-	createOrderUseCase := usecase.NewCreateOrderUseCase(orderRepository)
+	//events
+	orderCreated := event.NewOrderCreated()
+	eventDispatcher := infraEvent.NewDispatcher(ch)
+
+	createOrderUseCase := usecase.NewCreateOrderUseCase(orderRepository, orderCreated, eventDispatcher)
 	orderHandler := web.NewOrderHandler(createOrderUseCase)
 
 	r := chi.NewRouter()
