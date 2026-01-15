@@ -83,7 +83,7 @@ go run cmd/api/main.go
 `POST /orders`
 
 ```bash
-curl -X POST http://localhost:8000/orders \
+curl -X POST http://localhost:8000/api/v1/orders \
      -H "Content-Type: application/json" \
      -d '{
         "id": "abc-123",
