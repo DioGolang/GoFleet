@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "internal/infra/grpc/pb";
+
+service FleetService {
+  rpc SearchDriver (SearchDriverRequest) returns (SearchDriverResponse);
+}
+
+message SearchDriverRequest {
+  string order_id = 1;
+}
+
+message SearchDriverResponse {
+  string driver_id = 1;
+  string name = 2;
+  double lat = 3;
+  double lng = 4;
+}
