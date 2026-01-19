@@ -110,5 +110,5 @@ Este projeto serve como base de estudo para trilhas avançadas de Go:
 * [x] **Fase 1:** Setup, Clean Arch, DDD Entities e SQLC.
 * [x] **Fase 2:** API REST com Chi, Context e DI Manual.
 * [x] **Fase 3:** Event-Driven Architecture com RabbitMQ (Async).
-* [ ] **Fase 4:** Microsserviços e comunicação gRPC.
+* [x] **Fase 4:** Microsserviços e comunicação gRPC.
 * [ ] **Fase 5:** CI/CD e Deploy com Docker Multistage.
