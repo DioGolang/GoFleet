@@ -1,21 +1,25 @@
 package event
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/DioGolang/GoFleet/internal/application/dto"
+	"github.com/DioGolang/GoFleet/internal/infra/grpc/pb"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
 	"time"
 )
 
 type Consumer struct {
-	Conn *amqp.Connection
+	Conn       *amqp.Connection
+	GrpcClient pb.FleetServiceClient
 }
 
-func NewConsumer(conn *amqp.Connection) *Consumer {
+func NewConsumer(conn *amqp.Connection, grpcClient pb.FleetServiceClient) *Consumer {
 	return &Consumer{
-		Conn: conn,
+		Conn:       conn,
+		GrpcClient: grpcClient,
 	}
 }
 
@@ -52,10 +56,23 @@ func (c *Consumer) Start(queueName string) error {
 				continue
 			}
 
-			// 2. Simular busca de motorista (Regra de Negócio futura)
 			fmt.Printf("Seeking driver for order %s...\n", orderDTO.ID)
 			time.Sleep(2 * time.Second) // Simula latência (cálculo de rota)
-			fmt.Println("Driver found and notified!")
+
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+			defer cancel()
+
+			res, err := c.GrpcClient.SearchDriver(ctx, &pb.SearchDriverRequest{
+				OrderId: orderDTO.ID,
+			})
+
+			if err != nil {
+				log.Printf("❌ Erro ao buscar motorista: %v", err)
+				d.Ack(false) // Ou d.Nack() para tentar depois
+				continue
+			}
+
+			fmt.Printf("✅ Motorista encontrado: %s (%s) \n", res.Name, res.DriverId)
 
 			// 3. Acknowledge (Avisar ao RabbitMQ que pode apagar a mensagem)
 			d.Ack(false)
