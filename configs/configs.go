@@ -9,6 +9,8 @@ type Conf struct {
 	DBUser        string `mapstructure:"DB_USER"`
 	DBPassword    string `mapstructure:"DB_PASSWORD"`
 	DBName        string `mapstructure:"DB_NAME"`
+	RedisHost     string `mapstructure:"REDIS_HOST"`
+	RedisPort     string `mapstructure:"REDIS_PORT"`
 	WebServerPort string `mapstructure:"WEB_SERVER_PORT"`
 	GRPCPort      string `mapstructure:"GRPC_PORT"`
 	AMQPort       string `mapstructure:"AMQ_PORT"`
