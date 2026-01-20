@@ -1,114 +1,180 @@
 # 🚚 GoFleet
 
-> **Sistema Distribuído de Gestão Logística e Entregas**
+> **Sistema Distribuído de Logística e Despacho em Tempo Real**
 
-O **GoFleet** é um backend de alta performance desenvolvido em **Go**, focado em resolver problemas de logística como gestão de pedidos, despacho de motoristas e rastreamento em tempo real.
+O **GoFleet** é um backend de alta performance projetado para resolver problemas de alocação de motoristas. Ele utiliza uma arquitetura orientada a eventos para garantir que a API permaneça responsiva mesmo sob alta carga, delegando o processamento pesado para workers assíncronos e serviços especializados.
 
-O projeto foi desenhado seguindo rigorosamente os princípios de **Clean Architecture** e **Domain-Driven Design (DDD)** para garantir desacoplamento, testabilidade e manutenibilidade.
+## 🏗️ Arquitetura do Sistema
 
-## 🏗️ Arquitetura e Design
+O sistema é composto por três aplicações distintas que operam em conjunto:
 
-O projeto segue o padrão **Standard Go Project Layout** e a **Clean Architecture**. O fluxo de dependência aponta sempre para dentro (Domínio).
+1. **API (REST):** Recebe pedidos e consulta status.
+2. **Worker (Background):** Consome eventos, processa regras de negócio e atualiza o banco.
+3. **Fleet Service (gRPC):** Microsserviço especializado em Geo-localização de alta velocidade.
+
+### Fluxo de Dados (Life Cycle)
 
 ```mermaid
-graph TD
-    A[External Clients / HTTP] --> B(Handler / Adapter)
-    B --> C(UseCase / Application)
-    C --> D{Entity / Domain}
-    C --> E[Repository Interface]
-    F[PostgreSQL / SQLC] -->|Implements| E
+sequenceDiagram
+    participant C as Client (HTTP)
+    participant A as API REST
+    participant DB as PostgreSQL
+    participant Q as RabbitMQ
+    participant W as Worker
+    participant F as Fleet Service (gRPC)
+    participant R as Redis (Geo)
+
+    C->>A: POST /orders (Cria Pedido)
+    A->>DB: INSERT Order (Status: PENDING)
+    A->>Q: Publish "OrderCreated"
+    A-->>C: 200 OK (Retorno imediato)
+    
+    Q->>W: Consome Mensagem
+    W->>F: SearchDriver(order_id) [gRPC]
+    F->>R: GEOSEARCH (Raio 5km)
+    R-->>F: Retorna Motorista (João)
+    F-->>W: Retorna DriverID
+    
+    W->>DB: UPDATE Order (Status: DISPATCHED, Driver: João)
+    W->>Q: Ack (Confirma processamento)
 
 ```
-
-### Estrutura de Pastas
-
-* `cmd/api`: Entrypoint da aplicação (Main).
-* `internal/domain/entity`: O coração do software. Regras de negócio puras e invariantes.
-* `internal/application`: Casos de uso (Orquestração).
-* `internal/infra`: Implementações técnicas (Banco de dados, Web Server, Filas).
-* `configs`: Gerenciamento de variáveis de ambiente.
-* `sql`: Migrations e Queries SQL puras.
 
 ## 🛠️ Tech Stack
 
-* **Linguagem:** Golang
-* **Web Framework:** Chi (Router leve e idiomático)
-* **Database:** PostgreSQL 15+
-* **Data Access:** SQLC (Type-safe SQL compiler)
-* **Configuração:** Viper
-* **Infraestrutura:** Docker & Docker Compose
-* *(Em breve)* **Mensageria:** RabbitMQ
-* *(Em breve)* **Comunicação Interna:** gRPC
+* **Core:** Golang 1.22+
+* **Comunicação Externa:** REST (Chi Router)
+* **Comunicação Interna:** gRPC + Protobuf
+* **Mensageria:** RabbitMQ (Event-Driven)
+* **Banco de Dados:** PostgreSQL 15 (Persistência Principal)
+* **Data Access:** SQLC (Type-safe SQL)
+* **Cache & Geo:** Redis 7 (GeoSpatial Index)
+* **Infra:** Docker & Docker Compose
 
-## 🚀 Como Rodar
+## 🚀 Como Rodar o Projeto
 
 ### Pré-requisitos
 
-* Go 1.21+
-* Docker & Docker Compose
-* Make (Opcional, mas recomendado)
+* Docker e Docker Compose instalados.
+* Go 1.22+ instalado.
+* Ferramenta `migrate` (opcional, mas recomendado) ou `sqlc` se for alterar queries.
 
-### Passo a Passo
+### 1. Subir Infraestrutura
 
-1. **Clone o repositório:**
-```bash
-git clone https://github.com/seu-usuario/gofleet.git
-cd gofleet
+Na raiz do projeto:
 
-```
-
-
-2. **Suba a infraestrutura (Postgres & RabbitMQ):**
 ```bash
 docker-compose up -d
 
 ```
 
+Isso iniciará: PostgreSQL, RabbitMQ e Redis.
 
-3. **Configure o ambiente:**
-   Certifique-se de que o arquivo `.env` existe na raiz (baseado no exemplo).
-4. **Execute a aplicação:**
+### 2. Configurar Banco de Dados
+
+Se for a primeira vez, crie as tabelas:
+
+```bash
+# Opção A: Copiar o SQL manual
+docker exec -it gofleet_db psql -U root -d gofleet -f /sql/migrations/000001_init.up.sql
+docker exec -it gofleet_db psql -U root -d gofleet -f /sql/migrations/000002_add_status.up.sql
+
+# Opção B: Usando golang-migrate (Se instalado)
+make migrateup
+
+```
+
+### 3. Executar os Serviços
+
+Você precisará de **3 terminais** abertos para rodar o ecossistema completo:
+
+**Terminal 1: Fleet Service (gRPC + Redis)**
+Este serviço popula o Redis com dados falsos de motoristas ao iniciar.
+
+```bash
+go run cmd/fleet/main.go
+
+```
+
+**Terminal 2: Worker (RabbitMQ Consumer)**
+Fica ouvindo a fila para processar novos pedidos.
+
+```bash
+go run cmd/worker/main.go
+
+```
+
+**Terminal 3: API (REST Server)**
+Recebe as requisições do usuário.
+
 ```bash
 go run cmd/api/main.go
 
 ```
 
+## 🔌 Utilizando a API
 
+### 1. Criar um Pedido
 
-## 🔌 API Endpoints
-
-### Orders
-
-**Criar um novo Pedido**
-`POST /orders`
+A API apenas aceita o pedido e responde rápido. O processamento é assíncrono.
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/orders \
      -H "Content-Type: application/json" \
      -d '{
-        "id": "abc-123",
-        "price": 100.50,
+        "id": "pedido-sp-01",
+        "price": 150.00,
         "tax": 10.0
      }'
 
 ```
 
-**Resposta de Sucesso (200 OK):**
+### 2. Verificar Resultado
 
-```json
-{
-  "id": "abc-123",
-  "final_price": 110.5
-}
+Consulte o banco ou logs do Worker para ver a mágica acontecer. O pedido deve passar de `PENDING` para `DISPATCHED` automaticamente.
+
+```bash
+# Via Banco de Dados
+docker exec -it gofleet_db psql -U root -d gofleet -c "SELECT * FROM orders WHERE id='pedido-sp-01';"
 
 ```
 
-## 📚 Roadmap de Desenvolvimento
+*Resultado esperado:* `status: DISPATCHED`, `driver_id: Joao-da-Silva`.
 
-Este projeto serve como base de estudo para trilhas avançadas de Go:
+## 📂 Estrutura do Projeto (Clean Architecture)
 
-* [x] **Fase 1:** Setup, Clean Arch, DDD Entities e SQLC.
-* [x] **Fase 2:** API REST com Chi, Context e DI Manual.
-* [x] **Fase 3:** Event-Driven Architecture com RabbitMQ (Async).
-* [x] **Fase 4:** Microsserviços e comunicação gRPC.
-* [ ] **Fase 5:** CI/CD e Deploy com Docker Multistage.
+```text
+.
+├── cmd/                # Entrypoints (Main)
+│   ├── api/            # API Rest
+│   ├── fleet/          # Servidor gRPC de Frotas
+│   └── worker/         # Processador de Background
+├── internal/
+│   ├── domain/         # Entidades e Regras de Negócio (Puro)
+│   ├── application/    # UseCases e Interfaces (Ports)
+│   └── infra/          # Implementações (DB, Web, Rabbit, gRPC)
+│       ├── database/   # Código gerado pelo SQLC
+│       ├── grpc/       # Implementação do Server e Client gRPC
+│       └── web/        # Handlers HTTP
+├── pkg/                # Código compartilhado (Events, Utils)
+├── sql/                # Queries e Migrations
+└── configs/            # Configuração via Viper (.env)
+
+```
+
+## 🧠 Decisões Arquiteturais
+
+1. **Redis para Geolocalização:** Utilizamos `GEOSEARCH` do Redis em vez de calcular distâncias no PostgreSQL (PostGIS) ou em memória no Go. Isso garante latência de sub-milissegundos na busca de motoristas e torna o serviço de frota *stateless*.
+2. **Worker Pattern:** A criação do pedido é desacoplada da busca por motoristas. Se o serviço de mapas cair, o pedido é salvo e processado depois (Resiliência).
+3. **SQLC:** Optamos por não usar ORM (GORM) para ter controle total das queries e performance máxima no acesso ao PostgreSQL.
+4. **gRPC:** Comunicação binária entre Worker e Fleet Service para economizar banda e tempo de CPU em alto tráfego.
+
+## 📝 Próximos Passos (Roadmap)
+
+* [ ] Implementar Graceful Shutdown em todos os serviços.
+* [ ] Adicionar Tracing Distribuído (OpenTelemetry) para ver a requisição passando por API -> Rabbit -> Worker -> gRPC.
+* [ ] Criar Dockerfile Multistage para deploy em Kubernetes.
+
+---
+
+Desenvolvido como estudo avançado de Go.
