@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/DioGolang/GoFleet/internal/infra/grpc/pb"
+	"github.com/redis/go-redis/v9"
 	"sync"
 )
 
@@ -17,52 +18,54 @@ type Driver struct {
 
 type FleetService struct {
 	pb.UnimplementedFleetServiceServer
-
-	// Estado em memória (Simulando um Redis)
-	drivers map[string]*Driver
-
-	// O Guardião da Concorrência
-	mu sync.RWMutex
+	RedisClient *redis.Client
+	mu          sync.RWMutex
 }
 
-func NewFleetService() *FleetService {
-	// popular com alguns motoristas fake
-	s := &FleetService{
-		drivers: make(map[string]*Driver),
+func NewFleetService(rds *redis.Client) *FleetService {
+	return &FleetService{
+		RedisClient: rds,
 	}
-
-	s.drivers["driver-1"] = &Driver{ID: "driver-1", Name: "João da Silva", Lat: -23.55, Lng: -46.63}
-	s.drivers["driver-2"] = &Driver{ID: "driver-2", Name: "Maria Oliveira", Lat: -23.56, Lng: -46.64}
-
-	return s
 }
 
 func (s *FleetService) SearchDriver(ctx context.Context, req *pb.SearchDriverRequest) (*pb.SearchDriverResponse, error) {
-	fmt.Printf("gRPC: Seeking driver for order %s\n", req.OrderId)
+	// 1. Simulação: O pedido tem uma lat/lng de origem (no mundo real viria no request)
+	orderLat, orderLng := -23.5505, -46.6333
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	// Lógica simplificada: Pega o primeiro que achar
-	// (Num cenário real, faria cálculo de distância Haversine)
-	for _, d := range s.drivers {
-		return &pb.SearchDriverResponse{
-			DriverId: d.ID,
-			Name:     d.Name,
-			Lat:      d.Lat,
-			Lng:      d.Lng,
-		}, nil
+	cmd := s.RedisClient.GeoSearchLocation(ctx, "drivers_locations",
+		&redis.GeoSearchLocationQuery{
+			GeoSearchQuery: redis.GeoSearchQuery{
+				Latitude:  orderLat,
+				Longitude: orderLng,
+				Radius:    5,
+				BoxUnit:   "km",
+				Sort:      "ASC",
+				Count:     1,
+			},
+			WithCoord: true,
+		},
+	)
+	locations, err := cmd.Result()
+	if err != nil {
+		return nil, err
 	}
+	if len(locations) == 0 {
+		return nil, fmt.Errorf("nno drivers found within 5km radius")
+	}
+	driver := locations[0]
 
-	return nil, fmt.Errorf("no driver available")
+	return &pb.SearchDriverResponse{
+		DriverId: driver.Name,
+		Name:     driver.Name,
+		Lat:      driver.Latitude,
+		Lng:      driver.Longitude,
+	}, nil
 }
 
-func (s *FleetService) UpdateDriverPosition(driverID string, lat, lng float64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if driver, exists := s.drivers[driverID]; exists {
-		driver.Lat = lat
-		driver.Lng = lng
-	}
+func (s *FleetService) UpdateDriverPosition(ctx context.Context, driverID string, lat, lng float64) error {
+	return s.RedisClient.GeoAdd(ctx, "drivers_locations", &redis.GeoLocation{
+		Name:      driverID,
+		Longitude: lng,
+		Latitude:  lat,
+	}).Err()
 }
