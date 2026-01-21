@@ -7,6 +7,7 @@ import (
 	"github.com/DioGolang/GoFleet/internal/infra/database"
 	"github.com/DioGolang/GoFleet/internal/infra/event"
 	"github.com/DioGolang/GoFleet/internal/infra/grpc/pb"
+	_ "github.com/lib/pq"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
