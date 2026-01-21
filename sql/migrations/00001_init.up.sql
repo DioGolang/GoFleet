@@ -2,6 +2,8 @@ CREATE TABLE orders (
     ID VARCHAR(255) NOT NULL PRIMARY KEY,
     price DECIMAL(10,2) NOT NULL,
     tax DECIMAL(10,2) NOT NULL,
-    final_price DECIMAL(10,2) NOT NULL
+    final_price DECIMAL(10,2) NOT NULL,
+    status      VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    driver_id   VARCHAR(255)
 );
 
