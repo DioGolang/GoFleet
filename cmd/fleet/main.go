@@ -37,7 +37,7 @@ func main() {
 	if err != nil {
 		return
 	} // Longe
-	fmt.Println("🗺️  Dados de GPS simulados carregados no Redis!")
+	fmt.Println("Simulated GPS data loaded into Redis!")
 
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
