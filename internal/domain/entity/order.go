@@ -13,6 +13,8 @@ type Order struct {
 	price      float64
 	tax        float64
 	finalPrice float64
+	state      OrderState
+	driverID   string
 }
 
 func NewOrder(id string, price float64, tax float64) (*Order, error) {
@@ -20,6 +22,7 @@ func NewOrder(id string, price float64, tax float64) (*Order, error) {
 		id:    id,
 		price: price,
 		tax:   tax,
+		state: &PendingState{},
 	}
 
 	err := order.Validate()
@@ -56,6 +59,10 @@ func (o *Order) CalculateFinalPrice() error {
 	return nil
 }
 
+func (o *Order) TransitionTo(newState OrderState) {
+	o.state = newState
+}
+
 func (o *Order) ID() string {
 	return o.id
 }
@@ -70,4 +77,39 @@ func (o *Order) Tax() float64 {
 
 func (o *Order) FinalPrice() float64 {
 	return o.finalPrice
+}
+
+func (o *Order) DriverID() string {
+	return o.driverID
+}
+
+func (o *Order) Dispatch(driverID string) error {
+	return o.state.Dispatch(o, driverID)
+}
+
+func (o *Order) Deliver() error {
+	return o.state.Deliver(o)
+}
+
+func (o *Order) Cancel() error {
+	return o.state.Cancel(o)
+}
+
+func (o *Order) StatusName() string {
+	return o.state.Name()
+}
+
+func ParseState(statusName string) (OrderState, error) {
+	switch statusName {
+	case "PENDING":
+		return &PendingState{}, nil
+	case "DISPATCHED":
+		return &DispatchedState{}, nil
+	case "DELIVERED":
+		return &DeliveredState{}, nil
+	case "CANCELLED":
+		return &CancelledState{}, nil
+	default:
+		return nil, errors.New("unknown state")
+	}
 }
