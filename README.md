@@ -4,6 +4,9 @@
 
 ![Go Version](https://img.shields.io/badge/go-%3E%3D1.22-blue)
 ![Architecture](https://img.shields.io/badge/arch-event--driven-orange)
+![Rabbitmq](https://img.shields.io/badge/-rabbitmq-%23FF6600?style=flat&logo=rabbitmq&logoColor=white)
+![Postgres](https://img.shields.io/badge/Postgres-%23316192.svg?logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-%23DD0031.svg?logo=redis&logoColor=white)
 ![Observability](https://img.shields.io/badge/observability-OpenTelemetry-purple)
 
 O **GoFleet** é um backend de alta performance projetado para resolver problemas de alocação de motoristas. Ele utiliza uma arquitetura orientada a eventos para garantir que a API permaneça responsiva mesmo sob alta carga, delegando o processamento pesado para workers assíncronos e serviços especializados.
@@ -44,7 +47,7 @@ graph LR
 * **Comunicação Externa:** REST (Chi Router)
 * **Comunicação Interna:** gRPC + Protobuf
 * **Mensageria:** RabbitMQ (Event-Driven)
-* **Banco de Dados:** PostgreSQL 15 (Persistência Principal)
+* **Banco de Dados:** PostgreSQL 18 (Persistência Principal)
 * **Data Access:** SQLC (Type-safe SQL)
 * **Cache & Geo:** Redis 7 (GeoSpatial Index)
 * **Observabilidade:** OpenTelemetry (OTel) & Jaeger.
