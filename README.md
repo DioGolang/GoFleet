@@ -2,6 +2,10 @@
 
 > **Sistema Distribuído de Logística e Despacho em Tempo Real**
 
+![Go Version](https://img.shields.io/badge/go-%3E%3D1.22-blue)
+![Architecture](https://img.shields.io/badge/arch-event--driven-orange)
+![Observability](https://img.shields.io/badge/observability-OpenTelemetry-purple)
+
 O **GoFleet** é um backend de alta performance projetado para resolver problemas de alocação de motoristas. Ele utiliza uma arquitetura orientada a eventos para garantir que a API permaneça responsiva mesmo sob alta carga, delegando o processamento pesado para workers assíncronos e serviços especializados.
 
 ## 🏗️ Arquitetura do Sistema
@@ -15,29 +19,23 @@ O sistema é composto por três aplicações distintas que operam em conjunto:
 ### Fluxo de Dados (Life Cycle)
 
 ```mermaid
-sequenceDiagram
-    participant C as Client (HTTP)
-    participant A as API REST
-    participant DB as PostgreSQL
-    participant Q as RabbitMQ
-    participant W as Worker
-    participant F as Fleet Service (gRPC)
-    participant R as Redis (Geo)
-
-    C->>A: POST /orders (Cria Pedido)
-    A->>DB: INSERT Order (Status: PENDING)
-    A->>Q: Publish "OrderCreated"
-    A-->>C: 200 OK (Retorno imediato)
+graph LR
+    User((Client)) -->|POST /orders| API[API Service]
+    API -->|Persist| DB[(Postgres)]
+    API -->|Publish Event| Rabbit{RabbitMQ}
     
-    Q->>W: Consome Mensagem
-    W->>F: SearchDriver(order_id) [gRPC]
-    F->>R: GEOSEARCH (Raio 5km)
-    R-->>F: Retorna Motorista (João)
-    F-->>W: Retorna DriverID
+    Rabbit -->|Consume| Worker[Worker Service]
     
-    W->>DB: UPDATE Order (Status: DISPATCHED, Driver: João)
-    W->>Q: Ack (Confirma processamento)
-
+    Worker -->|gRPC Request| Fleet[Fleet Service]
+    Fleet -->|GeoSearch| Redis[(Redis)]
+    
+    Worker -->|Update Status| DB
+    
+    subgraph Observability
+        API -.->|Trace| Jaeger
+        Worker -.->|Trace| Jaeger
+        Fleet -.->|Trace| Jaeger
+    end
 ```
 
 ## 🛠️ Tech Stack
@@ -49,6 +47,7 @@ sequenceDiagram
 * **Banco de Dados:** PostgreSQL 15 (Persistência Principal)
 * **Data Access:** SQLC (Type-safe SQL)
 * **Cache & Geo:** Redis 7 (GeoSpatial Index)
+* **Observabilidade:** OpenTelemetry (OTel) & Jaeger.
 * **Infra:** Docker & Docker Compose
 
 ## 🚀 Como Rodar o Projeto
@@ -59,106 +58,101 @@ sequenceDiagram
 * Go 1.22+ instalado.
 * Ferramenta `migrate` (opcional, mas recomendado) ou `sqlc` se for alterar queries.
 
-### 1. Subir Infraestrutura
+### Passos
 
-Na raiz do projeto:
-
+1. **Clone o repositório:**
 ```bash
-docker-compose up -d
+git clone [https://github.com/seu-usuario/gofleet.git](https://github.com/seu-usuario/gofleet.git)
+cd gofleet
+
+```
+2. **Suba o ambiente completo:**
+```bash
+make docker-up
+# Ou: docker-compose up -d --build
 
 ```
 
-Isso iniciará: PostgreSQL, RabbitMQ e Redis.
-
-### 2. Configurar Banco de Dados
-
-Se for a primeira vez, crie as tabelas:
-
+*Nota: O banco de dados é inicializado automaticamente na primeira execução via script mapeado em `/docker-entrypoint-initdb.d`.*
+3. **Verifique o status:**
 ```bash
-# Opção A: Copiar o SQL manual
-docker exec -it gofleet_db psql -U root -d gofleet -f /sql/migrations/000001_init.up.sql
-docker exec -it gofleet_db psql -U root -d gofleet -f /sql/migrations/000002_add_status.up.sql
-
-# Opção B: Usando golang-migrate (Se instalado)
-make migrateup
+docker ps
+# Você deve ver 7 containers: api, worker, fleet, postgres, rabbitmq, redis, jaeger.
 
 ```
+## 🔌 API Endpoints & Teste
 
-### 3. Executar os Serviços
-
-Você precisará de **3 terminais** abertos para rodar o ecossistema completo:
-
-**Terminal 1: Fleet Service (gRPC + Redis)**
-Este serviço popula o Redis com dados falsos de motoristas ao iniciar.
-
-```bash
-go run cmd/fleet/main.go
-
-```
-
-**Terminal 2: Worker (RabbitMQ Consumer)**
-Fica ouvindo a fila para processar novos pedidos.
-
-```bash
-go run cmd/worker/main.go
-
-```
-
-**Terminal 3: API (REST Server)**
-Recebe as requisições do usuário.
-
-```bash
-go run cmd/api/main.go
-
-```
-
-## 🔌 Utilizando a API
-
-### 1. Criar um Pedido
-
-A API apenas aceita o pedido e responde rápido. O processamento é assíncrono.
+### Criar Pedido
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/orders \
      -H "Content-Type: application/json" \
      -d '{
-        "id": "pedido-sp-01",
-        "price": 150.00,
+        "id": "pedido-demo-01",
+        "price": 100.50,
         "tax": 10.0
      }'
 
 ```
 
-### 2. Verificar Resultado
+**O que acontece nos bastidores:**
 
-Consulte o banco ou logs do Worker para ver a mágica acontecer. O pedido deve passar de `PENDING` para `DISPATCHED` automaticamente.
+1. API salva como `PENDING`.
+2. RabbitMQ recebe evento.
+3. Worker processa e busca motorista via gRPC.
+4. Worker atualiza pedido para `DISPATCHED`.
+
+### Verificar Resultado (Banco de Dados)
 
 ```bash
-# Via Banco de Dados
-docker exec -it gofleet_db psql -U root -d gofleet -c "SELECT * FROM orders WHERE id='pedido-sp-01';"
+docker exec -it gofleet_db psql -U root -d gofleet -c "SELECT * FROM orders WHERE id = 'pedido-demo-01';"
 
 ```
 
-*Resultado esperado:* `status: DISPATCHED`, `driver_id: Joao-da-Silva`.
+## 👁️ Observabilidade (Tracing)
 
-## 📂 Estrutura do Projeto (Clean Architecture)
+O sistema implementa **Distributed Tracing** com OpenTelemetry.
+Para visualizar o caminho da requisição entre os microsserviços:
+
+1. Acesse o **Jaeger UI**: [http://localhost:16686](https://www.google.com/search?q=http://localhost:16686)
+2. Em "Service", selecione `gofleet-api`.
+3. Clique em **Find Traces**.
+4. Você verá o gráfico completo: `API -> RabbitMQ -> Worker -> gRPC -> Redis`.
+
+## 📂 Estrutura do Projeto (Monorepo)
 
 ```text
 .
-├── cmd/                # Entrypoints (Main)
-│   ├── api/            # API Rest
-│   ├── fleet/          # Servidor gRPC de Frotas
-│   └── worker/         # Processador de Background
+├── cmd/                # Entrypoints (Main files)
+│   ├── api/            # API REST
+│   ├── fleet/          # gRPC Service
+│   └── worker/         # RabbitMQ Consumer
+├── configs/            # Gerenciamento de env vars
 ├── internal/
-│   ├── domain/         # Entidades e Regras de Negócio (Puro)
-│   ├── application/    # UseCases e Interfaces (Ports)
-│   └── infra/          # Implementações (DB, Web, Rabbit, gRPC)
-│       ├── database/   # Código gerado pelo SQLC
-│       ├── grpc/       # Implementação do Server e Client gRPC
-│       └── web/        # Handlers HTTP
-├── pkg/                # Código compartilhado (Events, Utils)
-├── sql/                # Queries e Migrations
-└── configs/            # Configuração via Viper (.env)
+│   ├── application/    # Casos de Uso (Use Cases)
+│   ├── domain/         # Entidades e Interfaces (Core)
+│   └── infra/          # Implementações (DB, Web, Event, gRPC)
+├── pkg/                # Códigos compartilhados (OTel, Utils)
+├── sql/                # Migrations e Queries
+└── docker-compose.yaml # Orquestração
+
+```
+
+## 📜 Desenvolvimento Local
+
+Se você quiser rodar os serviços Go fora do Docker (para debug na IDE):
+
+1. Suba apenas a infraestrutura:
+```bash
+docker-compose up -d postgres rabbitmq redis jaeger
+
+```
+
+2. Execute os serviços (em terminais separados):
+```bash
+make run-fleet
+make run-api
+make run-worker
 
 ```
 
@@ -174,7 +168,6 @@ docker exec -it gofleet_db psql -U root -d gofleet -c "SELECT * FROM orders WHER
 * [ ] Implementar Graceful Shutdown em todos os serviços.
 * [ ] Adicionar Tracing Distribuído (OpenTelemetry) para ver a requisição passando por API -> Rabbit -> Worker -> gRPC.
 * [ ] Criar Dockerfile Multistage para deploy em Kubernetes.
-
 ---
 
 Desenvolvido como estudo avançado de Go.
