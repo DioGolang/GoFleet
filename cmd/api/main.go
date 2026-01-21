@@ -37,7 +37,8 @@ func main() {
 	}
 
 	//RabbiMQ
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	rabbitURL := fmt.Sprintf("amqp://guest:guest@%s:%s/", config.RabbitMQHost, config.AMQPort)
+	conn, err := amqp.Dial(rabbitURL)
 	if err != nil {
 		panic(err)
 	}
