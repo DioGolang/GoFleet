@@ -33,6 +33,10 @@ func (c *Consumer) Start(queueName string) error {
 	}
 	defer ch.Close()
 
+	if err := c.setupTopology(ch, queueName); err != nil {
+		return fmt.Errorf("error when configuring topology: %w", err)
+	}
+
 	msgs, err := ch.Consume(
 		queueName,
 		"",
@@ -87,5 +91,20 @@ func (c *Consumer) Start(queueName string) error {
 	fmt.Println(" [*] Waiting for messages. To exit press CTRL+C")
 	<-forever
 
+	return nil
+}
+
+func (c *Consumer) setupTopology(ch *amqp.Channel, queueName string) error {
+	_, err := ch.QueueDeclare(
+		queueName,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
 	return nil
 }
