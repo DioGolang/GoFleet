@@ -14,6 +14,9 @@ type Conf struct {
 	WebServerPort string `mapstructure:"WEB_SERVER_PORT"`
 	GRPCPort      string `mapstructure:"GRPC_PORT"`
 	AMQPort       string `mapstructure:"AMQ_PORT"`
+	RabbitMQHost  string `mapstructure:"RABBITMQ_HOST"`
+	FleetHost     string `mapstructure:"FLEET_HOST"`
+	FleetPort     string `mapstructure:"FLEET_PORT"`
 }
 
 func LoadConfig(path string) (*Conf, error) {
