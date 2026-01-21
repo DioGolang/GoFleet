@@ -1,4 +1,5 @@
 services:
+  # --- INFRASTRUCTURE ---
   postgres:
     image: postgres:18.1
     container_name: gofleet_db
@@ -9,7 +10,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql/data
       - ./sql/migrations/00001_init.up.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U root -d gofleet"]
@@ -36,6 +37,59 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+
+  # --- APP GO ---
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: api
+    container_name: gofleet_api
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    environment:
+      DB_HOST: postgres
+      RABBITMQ_HOST: rabbitmq
+      WEB_SERVER_PORT: 8000
+
+  fleet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: fleet
+    container_name: gofleet_fleet
+    ports:
+      - "50051:50051"
+    depends_on:
+      - redis
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_NAME: worker
+    container_name: gofleet_worker
+    depends_on:
+      - rabbitmq
+      - postgres
+      - fleet
+    environment:
+      DB_HOST: postgres
+      RABBITMQ_HOST: rabbitmq
+      FLEET_HOST: fleet
+      FLEET_PORT: 50051
+
 volumes:
   postgres_data:
     driver: local
