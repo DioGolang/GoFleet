@@ -29,6 +29,11 @@ services:
       RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 5s
+      timeout: 10s
+      retries: 5
 
   redis:
     image: redis:8.4-alpine
@@ -37,6 +42,11 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--raw", "incr", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   # --- APP GO ---
   api:
@@ -48,15 +58,16 @@ services:
     container_name: gofleet_api
     ports:
       - "8000:8000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_started
     environment:
       DB_HOST: postgres
       RABBITMQ_HOST: rabbitmq
       WEB_SERVER_PORT: 8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: on-failure
 
   fleet:
     build:
@@ -67,11 +78,13 @@ services:
     container_name: gofleet_fleet
     ports:
       - "50051:50051"
-    depends_on:
-      - redis
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
+    depends_on:
+      redis:
+       condition: service_healthy
+    restart: on-failure
 
   worker:
     build:
@@ -80,16 +93,20 @@ services:
       args:
         SERVICE_NAME: worker
     container_name: gofleet_worker
-    depends_on:
-      - rabbitmq
-      - postgres
-      - fleet
     environment:
       DB_HOST: postgres
       RABBITMQ_HOST: rabbitmq
       FLEET_HOST: fleet
       FLEET_PORT: 50051
       AMQP_PORT: 5672
+    depends_on:
+     postgres:
+      condition: service_healthy
+     rabbitmq:
+      condition: service_healthy
+     fleet:
+      condition: service_started
+    restart: on-failure
 
 volumes:
   postgres_data:
