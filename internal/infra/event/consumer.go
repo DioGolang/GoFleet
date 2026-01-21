@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/DioGolang/GoFleet/internal/application/dto"
+	"github.com/DioGolang/GoFleet/internal/application/port"
 	"github.com/DioGolang/GoFleet/internal/infra/grpc/pb"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"log"
@@ -12,14 +13,16 @@ import (
 )
 
 type Consumer struct {
-	Conn       *amqp.Connection
-	GrpcClient pb.FleetServiceClient
+	Conn            *amqp.Connection
+	GrpcClient      pb.FleetServiceClient
+	OrderRepository port.OrderRepository
 }
 
-func NewConsumer(conn *amqp.Connection, grpcClient pb.FleetServiceClient) *Consumer {
+func NewConsumer(conn *amqp.Connection, grpcClient pb.FleetServiceClient, repo port.OrderRepository) *Consumer {
 	return &Consumer{
-		Conn:       conn,
-		GrpcClient: grpcClient,
+		Conn:            conn,
+		GrpcClient:      grpcClient,
+		OrderRepository: repo,
 	}
 }
 
@@ -47,35 +50,37 @@ func (c *Consumer) Start(queueName string) error {
 
 	go func() {
 		for d := range msgs {
-			fmt.Printf("I received a message: %s\n", d.Body)
+			fmt.Printf("📦 Recebi mensagem. Processando...\n")
 
 			var orderDTO dto.CreateOrderOutput
-			err := json.Unmarshal(d.Body, &orderDTO)
-			if err != nil {
-				log.Printf("Erro ao fazer parse do JSON: %v", err)
+			if err := json.Unmarshal(d.Body, &orderDTO); err != nil {
+				log.Printf("Erro parse JSON: %v", err)
+				d.Nack(false, false)
 				continue
 			}
 
-			fmt.Printf("Seeking driver for order %s...\n", orderDTO.ID)
-			time.Sleep(2 * time.Second) // Simula latência (cálculo de rota)
-
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-			defer cancel()
-
-			res, err := c.GrpcClient.SearchDriver(ctx, &pb.SearchDriverRequest{
-				OrderId: orderDTO.ID,
-			})
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			res, err := c.GrpcClient.SearchDriver(ctx, &pb.SearchDriverRequest{OrderId: orderDTO.ID})
+			cancel()
 
 			if err != nil {
-				log.Printf("❌ Erro ao buscar motorista: %v", err)
-				d.Ack(false) // Ou d.Nack() para tentar depois
+				log.Printf("❌ No drivers found: %v. Trying again later...", err)
+				d.Nack(false, true)
 				continue
 			}
 
-			fmt.Printf("✅ Motorista encontrado: %s (%s) \n", res.Name, res.DriverId)
+			fmt.Printf("Driver found: %s. Updating bank...\n", res.Name)
 
-			// 3. Acknowledge (Avisar ao RabbitMQ que pode apagar a mensagem)
+			err = c.OrderRepository.UpdateStatus(context.Background(), orderDTO.ID, "DISPATCHED", res.DriverId)
+			if err != nil {
+				log.Printf("Error saving to bank: %v", err)
+				d.Nack(false, true)
+				continue
+			}
+
+			// 3. Sucesso total
 			d.Ack(false)
+			fmt.Printf("Order %s dispatched successfully!\n", orderDTO.ID)
 		}
 	}()
 
