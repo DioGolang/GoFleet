@@ -29,7 +29,7 @@ services:
       - rabbitmq_data:/var/lib/rabbitmq
 
   redis:
-    image: redis-8.4-alpine
+    image: redis:8.4-alpine
     container_name: gofleet_redis
     ports:
       - "6379:6379"
