@@ -18,13 +18,15 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	uri := "amqp://guest:guest@localhost:" + config.AMQPort + "/"
-	conn, err := amqp.Dial(uri)
+	// RabbitMQ
+	rabbitURL := fmt.Sprintf("amqp://guest:guest@%s:%s/", config.RabbitMQHost, config.AMQPort)
+	conn, err := amqp.Dial(rabbitURL)
 	if err != nil {
 		panic(err)
 	}
 	defer conn.Close()
 
+	//Postgres
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
 	db, err := sql.Open(config.DBDriver, dsn)
@@ -35,7 +37,9 @@ func main() {
 
 	repository := database.NewOrderRepository(db)
 
-	grpcConn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// gRPC
+	grpcURL := fmt.Sprintf("%s:%s", config.FleetHost, config.FleetPort)
+	grpcConn, err := grpc.NewClient(grpcURL, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		panic(err)
 	}
