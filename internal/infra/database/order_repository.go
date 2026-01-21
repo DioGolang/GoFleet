@@ -27,9 +27,19 @@ func (r *OrderRepositoryImpl) Save(order *entity.Order) error {
 		Price:      priceStr,
 		Tax:        taxStr,
 		FinalPrice: finalPriceStr,
+		Status:     order.StatusName(),
+		DriverID:   sql.NullString{String: order.DriverID(), Valid: order.DriverID() != ""},
 	})
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+func (r *OrderRepositoryImpl) UpdateStatus(ctx context.Context, id string, status string, driverID string) error {
+	return r.UpdateOrderStatus(ctx, UpdateOrderStatusParams{
+		Status:   status,
+		DriverID: sql.NullString{String: driverID, Valid: driverID != ""},
+		ID:       id,
+	})
 }
