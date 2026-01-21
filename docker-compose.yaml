@@ -89,6 +89,7 @@ services:
       RABBITMQ_HOST: rabbitmq
       FLEET_HOST: fleet
       FLEET_PORT: 50051
+      AMQP_PORT: 5672
 
 volumes:
   postgres_data:
