@@ -53,9 +53,9 @@ func main() {
 	setupSeedData(ctx, fleetService)
 
 	// gRPC Server com Interceptor OTel
-	lis, err := net.Listen("tcp", ":"+config.GRPCPort)
+	lis, err := net.Listen("tcp", ":"+config.FleetPort)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		log.Fatalf("failed to listen on port %s: %v", config.FleetPort, err)
 	}
 
 	grpcServer := grpc.NewServer(
@@ -67,7 +67,7 @@ func main() {
 
 	// Start gRPC Server
 	go func() {
-		log.Printf("Fleet gRPC Server running on port %s", config.GRPCPort)
+		log.Printf("Fleet gRPC Server running on port %s", config.FleetPort)
 		if err := grpcServer.Serve(lis); err != nil {
 			log.Printf("gRPC server error: %v", err)
 		}
