@@ -54,6 +54,7 @@ func main() {
 	grpcConn, err := grpc.NewClient(grpcURL,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig": [{"round_robin":{}}], "methodConfig": [{"name": [{"service": ""}], "retryPolicy": {"maxAttempts": 5, "initialBackoff": "0.1s", "maxBackoff": "1s", "backoffMultiplier": 2.0, "retryableStatusCodes": ["UNAVAILABLE"]}}]}`),
 	)
 	if err != nil {
 		log.Fatalf("grpc connection failed: %v", err)
