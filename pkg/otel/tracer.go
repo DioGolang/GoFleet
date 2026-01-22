@@ -42,7 +42,7 @@ func InitProvider(ctx context.Context, serviceName string, collectorAddr string)
 			sdktrace.WithMaxExportBatchSize(512),
 		),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(0.1))),
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
 	)
 
 	otel.SetTracerProvider(traceProvider)
