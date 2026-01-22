@@ -7,9 +7,14 @@ import (
 	"github.com/DioGolang/GoFleet/internal/application/dto"
 	"github.com/DioGolang/GoFleet/internal/application/port"
 	"github.com/DioGolang/GoFleet/internal/infra/grpc/pb"
-	amqp "github.com/rabbitmq/amqp091-go"
+	carrier "github.com/DioGolang/GoFleet/pkg/otel"
 	"log"
 	"time"
+
+	amqp "github.com/rabbitmq/amqp091-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Consumer struct {
@@ -54,37 +59,51 @@ func (c *Consumer) Start(queueName string) error {
 
 	go func() {
 		for d := range msgs {
-			fmt.Printf("📦 Recebi mensagem. Processando...\n")
+			fmt.Printf("📦 I received message. Processing...\n")
+			amqpCarrier := carrier.AMQPHeadersCarrier(d.Headers)
+			ctx := context.Background()
+			ctx = otel.GetTextMapPropagator().Extract(ctx, amqpCarrier)
+
+			tracer := otel.GetTracerProvider().Tracer("worker-tracer")
+			ctx, span := tracer.Start(ctx, "ProcessOrder", trace.WithAttributes(
+				attribute.String("queue.name", queueName),
+			))
 
 			var orderDTO dto.CreateOrderOutput
 			if err := json.Unmarshal(d.Body, &orderDTO); err != nil {
 				log.Printf("Erro parse JSON: %v", err)
+				span.RecordError(err)
+				span.End()
 				d.Nack(false, false)
 				continue
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			res, err := c.GrpcClient.SearchDriver(ctx, &pb.SearchDriverRequest{OrderId: orderDTO.ID})
+			span.SetAttributes(attribute.String("order.id", orderDTO.ID))
+			ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+			res, err := c.GrpcClient.SearchDriver(ctxTimeout, &pb.SearchDriverRequest{OrderId: orderDTO.ID})
 			cancel()
 
 			if err != nil {
 				log.Printf("❌ No drivers found: %v. Trying again later...", err)
+				span.RecordError(err)
+				span.End()
 				d.Nack(false, true)
 				continue
 			}
 
 			fmt.Printf("Driver found: %s. Updating bank...\n", res.Name)
-
-			err = c.OrderRepository.UpdateStatus(context.Background(), orderDTO.ID, "DISPATCHED", res.DriverId)
+			err = c.OrderRepository.UpdateStatus(ctx, orderDTO.ID, "DISPATCHED", res.DriverId)
 			if err != nil {
 				log.Printf("Error saving to bank: %v", err)
+				span.RecordError(err)
+				span.End()
 				d.Nack(false, true)
 				continue
 			}
 
-			// 3. Sucesso total
 			d.Ack(false)
 			fmt.Printf("Order %s dispatched successfully!\n", orderDTO.ID)
+			span.End()
 		}
 	}()
 
