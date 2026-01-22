@@ -1,0 +1,11 @@
+### POST
+GET http://http://localhost:8000/api/v1/orders
+Content-Type: application/json
+
+{
+  "id":"pedido-003",
+  "price": 50.00,
+  "tax": 5.0
+}
+
+###
