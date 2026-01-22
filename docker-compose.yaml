@@ -61,6 +61,10 @@ services:
     environment:
       DB_HOST: postgres
       RABBITMQ_HOST: rabbitmq
+      OTEL_SERVICE_NAME: "gofleet-api"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_EXPORTER_OTLP_INSECURE: "true" # não usar TLS (estamos em dev)
+      OTEL_TRACES_SAMPLER: "always_on"
       WEB_SERVER_PORT: 8000
     depends_on:
       postgres:
@@ -81,6 +85,9 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      OTEL_SERVICE_NAME: "gofleet-fleet"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
     depends_on:
       redis:
        condition: service_healthy
@@ -99,6 +106,9 @@ services:
       FLEET_HOST: fleet
       FLEET_PORT: 50051
       AMQP_PORT: 5672
+      OTEL_SERVICE_NAME: "gofleet-worker"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4317"
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
     depends_on:
      postgres:
       condition: service_healthy
