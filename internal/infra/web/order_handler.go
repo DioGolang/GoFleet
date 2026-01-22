@@ -26,7 +26,7 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 
-	output, err := h.CreateOrderUseCase.Execute(dto)
+	output, err := h.CreateOrderUseCase.Execute(r.Context(), dto)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
