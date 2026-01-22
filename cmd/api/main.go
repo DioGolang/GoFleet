@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/DioGolang/GoFleet/configs"
 	"github.com/DioGolang/GoFleet/internal/application/usecase"
@@ -9,44 +11,56 @@ import (
 	"github.com/DioGolang/GoFleet/internal/infra/database"
 	infraEvent "github.com/DioGolang/GoFleet/internal/infra/event"
 	"github.com/DioGolang/GoFleet/internal/infra/web"
+	"github.com/DioGolang/GoFleet/pkg/otel"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	_ "github.com/lib/pq"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/riandyrn/otelchi"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func main() {
-	config, err := configs.LoadConfig(".")
+	config, err := configs.LoadConfig(".", "fleet-api")
 	if err != nil {
-		panic(err)
+		log.Fatalf("could not load config: %v", err)
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// 2. SETUP OpenTelemetry
+	shutdownOtel, err := otel.InitProvider(ctx, config.OtelServiceName, config.OtelExporterOTLPEndpoint)
+	if err != nil {
+		log.Fatalf("failed to init OTel: %v", err)
+	}
+	defer shutdownOtel()
+
+	// DATABASE (PostgreSQL)
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
-
 	db, err := sql.Open(config.DBDriver, dsn)
 	if err != nil {
-		panic(err)
+		log.Fatalf("db connection failed: %v", err)
 	}
 	defer db.Close()
 
-	if err = db.Ping(); err != nil {
-		panic(err)
-	}
-
-	//RabbiMQ
+	// MESSAGING (RabbitMQ)
 	rabbitURL := fmt.Sprintf("amqp://guest:guest@%s:%s/", config.RabbitMQHost, config.AMQPort)
 	conn, err := amqp.Dial(rabbitURL)
 	if err != nil {
-		panic(err)
+		log.Fatalf("rabbitmq connection failed: %v", err)
 	}
 	defer conn.Close()
 
 	ch, err := conn.Channel()
 	if err != nil {
-		panic(err)
+		log.Fatalf("rabbitmq channel failed: %v", err)
 	}
 	defer ch.Close()
 
@@ -73,22 +87,43 @@ func main() {
 		panic(err)
 	}
 
+	// DEPENDENCIES & HANDLERS
 	orderRepository := database.NewOrderRepository(db)
-	//events
 	orderCreated := event.NewOrderCreated()
 	eventDispatcher := infraEvent.NewDispatcher(ch)
-
 	createOrderUseCase := usecase.NewCreateOrderUseCase(orderRepository, orderCreated, eventDispatcher)
 	orderHandler := web.NewOrderHandler(createOrderUseCase)
 
+	// ROUTER COM OTEL MIDDLEWARE
 	r := chi.NewRouter()
+	r.Use(otelchi.Middleware(config.OtelServiceName, otelchi.WithChiRoutes(r)))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
 	r.Post("/api/v1/orders", orderHandler.Create)
 
-	fmt.Println("Server running on port", config.WebServerPort)
+	// HTTP SERVER SHUTDOWN
+	srv := &http.Server{
+		Addr:    ":" + config.WebServerPort,
+		Handler: r,
+	}
 
-	log.Fatal(http.ListenAndServe(":"+config.WebServerPort, r))
+	go func() {
+		fmt.Println("Server running on port", config.WebServerPort)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen: %s\n", err)
+		}
+	}()
 
+	<-ctx.Done()
+	fmt.Println("\nShutting down gracefully...")
+
+	// Timeout to finish pending requests
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+	fmt.Println("Server exited cleanly")
 }
