@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"context"
 	"github.com/DioGolang/GoFleet/internal/application/dto"
 	"github.com/DioGolang/GoFleet/internal/application/port"
 	"github.com/DioGolang/GoFleet/internal/domain/entity"
@@ -21,7 +22,7 @@ func NewCreateOrderUseCase(orderRepository port.OrderRepository, created events.
 	}
 }
 
-func (uc *CreateOrderUseCase) Execute(input dto.CreateOrderInput) (dto.CreateOrderOutput, error) {
+func (uc *CreateOrderUseCase) Execute(ctx context.Context, input dto.CreateOrderInput) (dto.CreateOrderOutput, error) {
 	order, err := entity.NewOrder(input.ID, input.Price, input.Tax)
 	if err != nil {
 		return dto.CreateOrderOutput{}, err
@@ -36,7 +37,7 @@ func (uc *CreateOrderUseCase) Execute(input dto.CreateOrderInput) (dto.CreateOrd
 		FinalPrice: order.FinalPrice(),
 	}
 	uc.OrderCreated.SetPayload(output)
-	err = uc.EventDispatcher.Dispatch(uc.OrderCreated)
+	err = uc.EventDispatcher.Dispatch(ctx, uc.OrderCreated)
 	if err != nil {
 		return dto.CreateOrderOutput{}, err
 	}
