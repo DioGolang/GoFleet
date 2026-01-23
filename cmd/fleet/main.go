@@ -46,7 +46,13 @@ func main() {
 	if err := rdb.Ping(pingCtx).Err(); err != nil {
 		log.Fatalf("failed to connect to Redis: %v", err)
 	}
-	defer rdb.Close()
+	defer func(rdb *redis.Client) {
+		fmt.Println("Closing redis...")
+		err := rdb.Close()
+		if err != nil {
+			fmt.Printf("Error closing redis: %v\n", err)
+		}
+	}(rdb)
 
 	// Service & Seeding
 	fleetService := service.NewFleetService(rdb)
