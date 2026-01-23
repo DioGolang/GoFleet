@@ -5,6 +5,7 @@
 ![Go Version](https://img.shields.io/badge/go-%3E%3D1.22-blue)
 ![Architecture](https://img.shields.io/badge/arch-event--driven-orange)
 ![Rabbitmq](https://img.shields.io/badge/-rabbitmq-%23FF6600?style=flat&logo=rabbitmq&logoColor=white)
+![gRPC](https://img.shields.io/badge/powered_by-gRPC-blue?labelColor=orange)
 ![Postgres](https://img.shields.io/badge/Postgres-%23316192.svg?logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-%23DD0031.svg?logo=redis&logoColor=white)
 ![Observability](https://img.shields.io/badge/observability-OpenTelemetry-purple)
