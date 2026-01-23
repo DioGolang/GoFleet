@@ -8,6 +8,33 @@ services:
       - "4317:4317"
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+  # --- MONITORING ---
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: gofleet_prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090" # UI do Prometheus
+    restart: on-failure
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: gofleet_grafana
+    ports:
+      - "3000:3000" # UI do Grafana (admin/admin)
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_PLUGINS_PREINSTALL=grafana-clock-panel
+    depends_on:
+      - prometheus
+    restart: unless-stopped
   # --- INFRASTRUCTURE ---
   postgres:
     image: postgres:18.1
@@ -134,9 +161,8 @@ services:
     restart: on-failure
 
 volumes:
-  postgres_data:
-    driver: local
-  rabbitmq_data:
-    driver: local
-  redis_data:
-    driver: local
+  postgres_data: {}
+  rabbitmq_data: {}
+  redis_data: {}
+  prometheus_data: {}
+  grafana_data: {}
