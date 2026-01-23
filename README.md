@@ -65,7 +65,7 @@ graph LR
 
 1. **Clone o repositório:**
 ```bash
-git clone [https://github.com/seu-usuario/gofleet.git](https://github.com/seu-usuario/gofleet.git)
+git clone [https://github.com/diogolang/gofleet.git](https://github.com/diogolang/gofleet.git)
 cd gofleet
 
 ```
