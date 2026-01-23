@@ -4,9 +4,15 @@
 
 package database
 
+import (
+	"database/sql"
+)
+
 type Order struct {
-	ID         string `json:"id"`
-	Price      string `json:"price"`
-	Tax        string `json:"tax"`
-	FinalPrice string `json:"final_price"`
+	ID         string         `json:"id"`
+	Price      string         `json:"price"`
+	Tax        string         `json:"tax"`
+	FinalPrice string         `json:"final_price"`
+	Status     string         `json:"status"`
+	DriverID   sql.NullString `json:"driver_id"`
 }

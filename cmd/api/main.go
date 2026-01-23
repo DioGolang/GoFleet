@@ -48,7 +48,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("db connection failed: %v", err)
 	}
-	defer db.Close()
+	defer func(db *sql.DB) {
+		fmt.Println("Closing Database...")
+		err := db.Close()
+		if err != nil {
+			fmt.Printf("Error closing database: %v\n", err)
+		}
+	}(db)
 
 	// MESSAGING (RabbitMQ)
 	rabbitURL := fmt.Sprintf("amqp://guest:guest@%s:%s/", config.RabbitMQHost, config.AMQPort)
@@ -56,13 +62,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("rabbitmq connection failed: %v", err)
 	}
-	defer conn.Close()
+	defer func(conn *amqp.Connection) {
+		fmt.Println("Closing RabbitMQ...")
+		err := conn.Close()
+		if err != nil {
+			fmt.Printf("Error closing RabbitMQ: %v\n", err)
+		}
+	}(conn)
 
 	ch, err := conn.Channel()
 	if err != nil {
 		log.Fatalf("rabbitmq channel failed: %v", err)
 	}
-	defer ch.Close()
+	defer func(ch *amqp.Channel) {
+		fmt.Println("Closing rabbitmq channel...")
+		err := ch.Close()
+		if err != nil {
+			fmt.Printf("Error closing rabbitmq channel: %v\n", err)
+		}
+	}(ch)
 
 	_, err = ch.QueueDeclare(
 		"orders.created", // name

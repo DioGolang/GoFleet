@@ -11,7 +11,8 @@ import (
 type Querier interface {
 	CreateOrder(ctx context.Context, arg CreateOrderParams) error
 	GetOrder(ctx context.Context, id string) (Order, error)
-	ListOrders(ctx context.Context) ([]Order, error)
+	ListOrders(ctx context.Context) ([]ListOrdersRow, error)
+	UpdateOrderStatus(ctx context.Context, arg UpdateOrderStatusParams) error
 }
 
 var _ Querier = (*Queries)(nil)

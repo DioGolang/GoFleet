@@ -43,6 +43,11 @@ func InitProvider(ctx context.Context, serviceName string, collectorAddr string)
 		),
 		sdktrace.WithResource(res),
 		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		//sdktrace.WithSampler(
+		//	sdktrace.ParentBased(
+		//		sdktrace.TraceIDRatioBased(0.1),
+		//	),
+		// em prod para evitar alto custo de processamento.
 	)
 
 	otel.SetTracerProvider(traceProvider)

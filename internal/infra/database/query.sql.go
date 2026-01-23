@@ -7,18 +7,21 @@ package database
 
 import (
 	"context"
+	"database/sql"
 )
 
 const createOrder = `-- name: CreateOrder :exec
-INSERT INTO orders (id, price, tax, final_price)
-VALUES ($1, $2, $3, $4)
+INSERT INTO orders (id, price, tax, final_price, status, driver_id)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type CreateOrderParams struct {
-	ID         string `json:"id"`
-	Price      string `json:"price"`
-	Tax        string `json:"tax"`
-	FinalPrice string `json:"final_price"`
+	ID         string         `json:"id"`
+	Price      string         `json:"price"`
+	Tax        string         `json:"tax"`
+	FinalPrice string         `json:"final_price"`
+	Status     string         `json:"status"`
+	DriverID   sql.NullString `json:"driver_id"`
 }
 
 func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) error {
@@ -27,12 +30,14 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) error 
 		arg.Price,
 		arg.Tax,
 		arg.FinalPrice,
+		arg.Status,
+		arg.DriverID,
 	)
 	return err
 }
 
 const getOrder = `-- name: GetOrder :one
-SELECT id, price, tax, final_price FROM orders
+SELECT id, price, tax, final_price, status, driver_id FROM orders
 WHERE id = $1
 `
 
@@ -44,6 +49,8 @@ func (q *Queries) GetOrder(ctx context.Context, id string) (Order, error) {
 		&i.Price,
 		&i.Tax,
 		&i.FinalPrice,
+		&i.Status,
+		&i.DriverID,
 	)
 	return i, err
 }
@@ -52,15 +59,22 @@ const listOrders = `-- name: ListOrders :many
 SELECT id, price, tax, final_price FROM orders
 `
 
-func (q *Queries) ListOrders(ctx context.Context) ([]Order, error) {
+type ListOrdersRow struct {
+	ID         string `json:"id"`
+	Price      string `json:"price"`
+	Tax        string `json:"tax"`
+	FinalPrice string `json:"final_price"`
+}
+
+func (q *Queries) ListOrders(ctx context.Context) ([]ListOrdersRow, error) {
 	rows, err := q.db.QueryContext(ctx, listOrders)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Order
+	var items []ListOrdersRow
 	for rows.Next() {
-		var i Order
+		var i ListOrdersRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Price,
@@ -78,4 +92,21 @@ func (q *Queries) ListOrders(ctx context.Context) ([]Order, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateOrderStatus = `-- name: UpdateOrderStatus :exec
+UPDATE orders
+SET status = $1, driver_id = $2
+WHERE id = $3
+`
+
+type UpdateOrderStatusParams struct {
+	Status   string         `json:"status"`
+	DriverID sql.NullString `json:"driver_id"`
+	ID       string         `json:"id"`
+}
+
+func (q *Queries) UpdateOrderStatus(ctx context.Context, arg UpdateOrderStatusParams) error {
+	_, err := q.db.ExecContext(ctx, updateOrderStatus, arg.Status, arg.DriverID, arg.ID)
+	return err
 }
