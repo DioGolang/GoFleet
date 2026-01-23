@@ -45,7 +45,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("db connection failed: %v", err)
 	}
-	defer db.Close()
+	defer func(db *sql.DB) {
+		fmt.Println("Closing Database...")
+		err := db.Close()
+		if err != nil {
+			fmt.Printf("Error closing database: %v\n", err)
+		}
+	}(db)
 
 	repository := database.NewOrderRepository(db)
 
@@ -59,7 +65,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("grpc connection failed: %v", err)
 	}
-	defer grpcConn.Close()
+	defer func(grpcConn *grpc.ClientConn) {
+		fmt.Println("Closing gRPC...")
+		err := grpcConn.Close()
+		if err != nil {
+			fmt.Printf("Error closing gRPC: %v\n", err)
+		}
+	}(grpcConn)
 	grpcClient := pb.NewFleetServiceClient(grpcConn)
 
 	// 5. RabbitMQ Connection
@@ -68,7 +80,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("rabbitmq connection failed: %v", err)
 	}
-	defer conn.Close()
+	defer func(conn *amqp.Connection) {
+		fmt.Println("Closing RabbitMQ...")
+		err := conn.Close()
+		if err != nil {
+			fmt.Printf("Error closing RabbitMQ: %v\n", err)
+		}
+	}(conn)
 
 	// Consumer Logic
 	consumer := event.NewConsumer(conn, grpcClient, repository)
