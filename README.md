@@ -34,22 +34,21 @@ O sistema é um monorepo composto por três microsserviços principais:
 ```mermaid
 graph LR
     Client -->|HTTP POST| API[API Service]
-    API -->|Decorated UseCase| Metrics(Prometheus)
+    API -->|Decorated UseCase| Metrics[Prometheus]
     API -->|Propagated Context| RabbitMQ[(RabbitMQ)]
     
     RabbitMQ -->|Consume| Worker[Worker Service]
-    Worker -->|Trace Context| Fleet[Fleet Service (gRPC)]
+    Worker -->|Trace Context| Fleet[Fleet Service - gRPC]
     Fleet -->|GeoSearch| Redis[(Redis)]
     Worker -->|SQLC| DB[(PostgreSQL)]
     
-    subgraph Observability Stack
+    subgraph Observability_Stack
         API -.->|OTLP| Jaeger
         Worker -.->|OTLP| Jaeger
         Fleet -.->|OTLP| Jaeger
-        Prometheus -.->|Scrape :2112| API
-        Prometheus -.->|Scrape :2112| Worker
+        Prometheus -.->|Scrape 2112| API
+        Prometheus -.->|Scrape 2112| Worker
     end
-
 ```
 
 ---
