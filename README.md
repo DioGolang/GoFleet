@@ -17,96 +17,89 @@
 ![Kubernetes](https://img.shields.io/badge/infra-Kubernetes-326CE5?style=flat-square&logo=kubernetes&logoColor=white)
 
 
+O **GoFleet** é um backend de alta performance projetado para demonstrar padrões avançados de engenharia de software, incluindo **Distributed Tracing**, **Metrics Instrumentation** e **State Pattern**. O sistema orquestra a criação de pedidos, processamento assíncrono e geolocalização de motoristas.
 
+---
 
+## 🏗️ Arquitetura
 
+O sistema é um monorepo composto por três microsserviços principais:
 
-O **GoFleet** é um backend de alta performance projetado para resolver problemas de alocação de motoristas. Ele utiliza uma arquitetura orientada a eventos para garantir que a API permaneça responsiva mesmo sob alta carga, delegando o processamento pesado para workers assíncronos e serviços especializados.
+1.  **API Service (`cmd/api`)**: Gateway REST que recebe pedidos.
+2.  **Worker Service (`cmd/worker`)**: Processador assíncrono que consome filas, gerencia regras de negócio e persistência.
+3.  **Fleet Service (`cmd/fleet`)**: Microsserviço gRPC de alta performance para busca geoespacial (Redis).
 
-## 🏗️ Arquitetura do Sistema
-
-O sistema é composto por três aplicações distintas que operam em conjunto:
-
-1. **API (REST):** Recebe pedidos e consulta status.
-2. **Worker (Background):** Consome eventos, processa regras de negócio e atualiza o banco.
-3. **Fleet Service (gRPC):** Microsserviço especializado em Geo-localização de alta velocidade.
-
-### Fluxo de Dados (Life Cycle)
+### Fluxo de Observabilidade e Dados
 
 ```mermaid
 graph LR
-    User((Client)) -->|POST /orders| API[API Service]
-    API -->|Persist| DB[(Postgres)]
-    API -->|Publish Event| Rabbit{RabbitMQ}
+    Client -->|HTTP POST| API[API Service]
+    API -->|Decorated UseCase| Metrics(Prometheus)
+    API -->|Propagated Context| RabbitMQ[(RabbitMQ)]
     
-    Rabbit -->|Consume| Worker[Worker Service]
-    
-    Worker -->|gRPC Request| Fleet[Fleet Service]
+    RabbitMQ -->|Consume| Worker[Worker Service]
+    Worker -->|Trace Context| Fleet[Fleet Service (gRPC)]
     Fleet -->|GeoSearch| Redis[(Redis)]
+    Worker -->|SQLC| DB[(PostgreSQL)]
     
-    Worker -->|Update Status| DB
-    
-    subgraph Observability
-        API -.->|Trace| Jaeger
-        Worker -.->|Trace| Jaeger
-        Fleet -.->|Trace| Jaeger
+    subgraph Observability Stack
+        API -.->|OTLP| Jaeger
+        Worker -.->|OTLP| Jaeger
+        Fleet -.->|OTLP| Jaeger
+        Prometheus -.->|Scrape :2112| API
+        Prometheus -.->|Scrape :2112| Worker
     end
+
 ```
 
-## 🛠️ Tech Stack
+---
 
-* **Core:** Golang 1.22+
-* **Comunicação Externa:** REST (Chi Router)
-* **Comunicação Interna:** gRPC + Protobuf
-* **Mensageria:** RabbitMQ (Event-Driven)
-* **Banco de Dados:** PostgreSQL 18 (Persistência Principal)
-* **Data Access:** SQLC (Type-safe SQL)
-* **Cache & Geo:** Redis 7 (GeoSpatial Index)
-* **Observabilidade:** OpenTelemetry (OTel) & Jaeger.
-* **Infra:** Docker & Docker Compose
+## 🛠️ Stack Tecnológico
 
-## 🚀 Como Rodar o Projeto
+* **Linguagem**: Go 1.25
+* **Web Framework**: Chi Router v5 (Leve e idiomático)
+* **RPC**: gRPC + Protobuf (Comunicação interna otimizada)
+* **Database**: PostgreSQL 18 (SQLC para queries Type-Safe)
+* **Cache/Geo**: Redis + Go-Redis (GeoSpatial Indexing)
+* **Observabilidade**:
+* **Tracing**: OpenTelemetry (OTel) com Jaeger.
+* **Metrics**: Prometheus (Custom Registry & Decorators).
+* **Logs**: Zap (Estruturados com TraceID).
+
+---
+
+## 🚀 Como Executar
 
 ### Pré-requisitos
 
-* Docker e Docker Compose instalados.
-* Go 1.22+ instalado.
-* Ferramenta `migrate` (opcional, mas recomendado) ou `sqlc` se for alterar queries.
+* Docker & Docker Compose
+* Go 1.25+ (para desenvolvimento local)
+* Make
 
-### Passos
+### Quick Start
 
-1. **Clone o repositório:**
-```bash
-git clone [https://github.com/diogolang/gofleet.git](https://github.com/diogolang/gofleet.git)
-cd gofleet
-
-```
-2. **Suba o ambiente completo:**
+1. **Suba o ambiente completo:**
 ```bash
 make docker-up
-# Ou: docker-compose up -d --build
 
 ```
 
-*Nota: O banco de dados é inicializado automaticamente na primeira execução via script mapeado em `/docker-entrypoint-initdb.d`.*
-3. **Verifique o status:**
-```bash
-docker ps
-# Você deve ver 7 containers: api, worker, fleet, postgres, rabbitmq, redis, jaeger.
+*Isso iniciará API, Worker, Fleet, DB, RabbitMQ, Redis, Jaeger, Prometheus e Grafana.*
+2. **Acesse as interfaces:**
+* **Grafana**: [http://localhost:3000](https://www.google.com/search?q=http://localhost:3000) (Login: `admin` / `admin`)
+* **Jaeger UI**: [http://localhost:16686](https://www.google.com/search?q=http://localhost:16686)
+* **Prometheus**: [http://localhost:9090](https://www.google.com/search?q=http://localhost:9090)
+* **RabbitMQ Mgmt**: [http://localhost:15672](https://www.google.com/search?q=http://localhost:15672) (guest/guest)
 
-```
-## 🔌 API Endpoints & Teste
+
+3. 🔌 API Endpoints & Teste
 
 ### Criar Pedido
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/orders \
-     -H "Content-Type: application/json" \
-     -d '{
-        "id": "pedido-demo-01",
-        "price": 100.50,
-        "tax": 10.0
-     }'
+-H "Content-Type: application/json" \
+-d '{"id":"pedido-01", "price": 100.0, "tax": 10.0}'
 
 ```
 
@@ -116,6 +109,8 @@ curl -X POST http://localhost:8000/api/v1/orders \
 2. RabbitMQ recebe evento.
 3. Worker processa e busca motorista via gRPC.
 4. Worker atualiza pedido para `DISPATCHED`.
+
+---
 
 ### Verificar Resultado (Banco de Dados)
 
@@ -134,42 +129,38 @@ Para visualizar o caminho da requisição entre os microsserviços:
 3. Clique em **Find Traces**.
 4. Você verá o gráfico completo: `API -> RabbitMQ -> Worker -> gRPC -> Redis`.
 
-## 📂 Estrutura do Projeto (Monorepo)
 
-```text
-.
-├── cmd/                # Entrypoints (Main files)
-│   ├── api/            # API REST
-│   ├── fleet/          # gRPC Service
-│   └── worker/         # RabbitMQ Consumer
-├── configs/            # Gerenciamento de env vars
-├── internal/
-│   ├── application/    # Casos de Uso (Use Cases)
-│   ├── domain/         # Entidades e Interfaces (Core)
-│   └── infra/          # Implementações (DB, Web, Event, gRPC)
-├── pkg/                # Códigos compartilhados (OTel, Utils)
-├── sql/                # Migrations e Queries
-└── docker-compose.yaml # Orquestração
+## 🧠 Decisões de Design (Staff Engineer View)
 
-```
+### 1. Decorator Pattern para Observabilidade
 
-## 📜 Desenvolvimento Local
+Em vez de poluir os Use Cases com códigos de métricas, utilizamos o padrão **Decorator**.
 
-Se você quiser rodar os serviços Go fora do Docker (para debug na IDE):
+* **Arquivo**: `internal/application/usecase/order/create_metrics.go`
+* **Benefício**: O `CreateUseCase` foca puramente em regras de negócio. O `CreateOrderMetricsDecorator` envolve a execução e registra a latência e contagem no Prometheus, mantendo o princípio de responsabilidade única (SRP).
 
-1. Suba apenas a infraestrutura:
-```bash
-docker-compose up -d postgres rabbitmq redis jaeger
+### 2. State Pattern no Domínio
 
-```
+O ciclo de vida do pedido (`PENDING` -> `DISPATCHED`) é gerenciado através do padrão **State**.
 
-2. Execute os serviços (em terminais separados):
-```bash
-make run-fleet
-make run-api
-make run-worker
+* **Arquivo**: `internal/domain/entity/states.go`
+* **Benefício**: Elimina condicionais complexas (`if status == "PENDING"`) e garante que transições inválidas retornem erro (ex: tentar cancelar um pedido já entregue).
 
-```
+### 3. Propagação de Contexto (Distributed Tracing)
+
+Implementamos a propagação de contexto manual no RabbitMQ.
+
+* **Arquivo**: `internal/infra/event/consumer.go`
+* **Benefício**: O TraceID gerado na API HTTP viaja nos headers da mensagem AMQP e é extraído pelo Worker. Isso permite visualizar no Jaeger a jornada completa da requisição, mesmo passando por filas assíncronas.
+
+### 4. Interface Segregation nas Métricas
+
+Definimos uma interface explícita para métricas.
+
+* **Arquivo**: `pkg/metrics/metrics.go`
+* **Benefício**: Permite trocar o provedor de métricas (ex: de Prometheus para Datadog) sem alterar uma linha de código nos Use Cases, apenas trocando a implementação injetada no `main.go`.
+
+---
 
 ## 🧠 Decisões Arquiteturais
 
@@ -178,11 +169,48 @@ make run-worker
 3. **SQLC:** Optamos por não usar ORM (GORM) para ter controle total das queries e performance máxima no acesso ao PostgreSQL.
 4. **gRPC:** Comunicação binária entre Worker e Fleet Service para economizar banda e tempo de CPU em alto tráfego.
 
-## 📝 Próximos Passos (Roadmap)
+## 📂 Estrutura de Pastas
 
-* [ ] Implementar Graceful Shutdown em todos os serviços.
-* [ ] Adicionar Tracing Distribuído (OpenTelemetry) para ver a requisição passando por API -> Rabbit -> Worker -> gRPC.
-* [ ] Criar Dockerfile Multistage para deploy em Kubernetes.
+```text
+.
+├── cmd/                # Entrypoints (api, fleet, worker)
+├── configs/            # Configuração via Viper
+├── internal/
+│   ├── application/    # Regras de Aplicação
+│   │   ├── usecase/    # Lógica de Negócio + Decorators
+│   │   └── port/       # Interfaces (Ports)
+│   ├── domain/         # Core Domain (Entities, Events, States)
+│   └── infra/          # Implementações (Adapters)
+│       ├── database/   # Repositórios e SQLC
+│       ├── event/      # RabbitMQ Consumer/Dispatcher
+│       ├── grpc/       # Protobuf e Service Implementation
+│       └── web/        # HTTP Handlers e Middlewares
+├── pkg/                # Libs Compartilhadas (Metrics, OTel, Utils)
+└── sql/                # Migrations e Queries
+
+```
+
 ---
 
-Desenvolvido como estudo avançado de Go.
+## 📊 Métricas Chave (Prometheus)
+
+O sistema expõe métricas customizadas na porta `:2112` para evitar ruído na porta principal da aplicação.
+
+* `app_usecase_total`: Contador de execuções por Use Case e Status.
+* `app_usecase_duration_seconds`: Histograma de latência (P95, P99).
+* `http_request_duration_seconds`: Latência dos endpoints REST.
+* `grpc_request_duration_seconds`: Latência das chamadas internas gRPC.
+* `goofleet_order_created_total`: Métrica de negócio (Contador de Pedidos).
+
+---
+
+## 🧪 Testes
+
+Execute a suíte de testes unitários:
+
+```bash
+make test
+
+```
+
+Os testes de entidade garantem a integridade das regras de negócio (ex: validação de preço negativo ou ID vazio).
