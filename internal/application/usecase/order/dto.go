@@ -2,7 +2,7 @@ package order
 
 // Input
 
-type CreateOrderInput struct {
+type CreateInput struct {
 	ID    string  `json:"id"`
 	Price float64 `json:"price"`
 	Tax   float64 `json:"tax"`
@@ -10,7 +10,7 @@ type CreateOrderInput struct {
 
 // Output
 
-type CreateOrderOutput struct {
+type CreateOutput struct {
 	ID         string  `json:"id"`
 	FinalPrice float64 `json:"final-price"`
 }

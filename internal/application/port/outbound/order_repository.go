@@ -1,4 +1,4 @@
-package port
+package outbound
 
 import (
 	"context"

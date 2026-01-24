@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/DioGolang/GoFleet/internal/application/dto"
-	"github.com/DioGolang/GoFleet/internal/application/port"
+	"github.com/DioGolang/GoFleet/internal/application/port/outbound"
+	"github.com/DioGolang/GoFleet/internal/application/usecase/order"
 	"github.com/DioGolang/GoFleet/internal/infra/grpc/pb"
 	carrier "github.com/DioGolang/GoFleet/pkg/otel"
 	"log"
@@ -20,10 +20,10 @@ import (
 type Consumer struct {
 	Conn            *amqp.Connection
 	GrpcClient      pb.FleetServiceClient
-	OrderRepository port.OrderRepository
+	OrderRepository outbound.OrderRepository
 }
 
-func NewConsumer(conn *amqp.Connection, grpcClient pb.FleetServiceClient, repo port.OrderRepository) *Consumer {
+func NewConsumer(conn *amqp.Connection, grpcClient pb.FleetServiceClient, repo outbound.OrderRepository) *Consumer {
 	return &Consumer{
 		Conn:            conn,
 		GrpcClient:      grpcClient,
@@ -69,7 +69,7 @@ func (c *Consumer) Start(queueName string) error {
 				attribute.String("queue.name", queueName),
 			))
 
-			var orderDTO dto.CreateOrderOutput
+			var orderDTO order.CreateOutput
 			if err := json.Unmarshal(d.Body, &orderDTO); err != nil {
 				log.Printf("Erro parse JSON: %v", err)
 				span.RecordError(err)
