@@ -1,24 +1,24 @@
-package web
+package handler
 
 import (
 	"encoding/json"
-	dto2 "github.com/DioGolang/GoFleet/internal/application/usecase/order"
+	"github.com/DioGolang/GoFleet/internal/application/usecase/order"
 	"net/http"
 )
 
-type OrderHandler struct {
+type Order struct {
 	EventService       any
-	CreateOrderUseCase *dto2.CreateUseCaseImpl
+	CreateOrderUseCase order.CreateUseCase
 }
 
-func NewOrderHandler(uc *dto2.CreateUseCaseImpl) *OrderHandler {
-	return &OrderHandler{
+func NewOrderHandler(uc order.CreateUseCase) *Order {
+	return &Order{
 		CreateOrderUseCase: uc,
 	}
 }
 
-func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
-	var dto dto2.CreateInput
+func (h *Order) Create(w http.ResponseWriter, r *http.Request) {
+	var dto order.CreateInput
 
 	err := json.NewDecoder(r.Body).Decode(&dto)
 	if err != nil {
