@@ -1,19 +1,15 @@
-services:
-  scrape_internal: 15s
-  evaluation_internal: 15s
+global:
+  scrape_interval: 15s
 
 scrape_configs:
-  # 1. API (Porta 2112 conforme sugerido no setup do Go)
   - job_name: 'gofleet-api'
     static_configs:
       - targets: ['gofleet_api:2112']
 
-  # 2. Fleet Service (gRPC)
   - job_name: 'gofleet-fleet'
     static_configs:
-      - targets: ['gofleet-fleet:2112']
+      - targets: ['gofleet_fleet:2112']
 
-  # 3. Worker (Consumidor RabbitMQ)
   - job_name: 'gofleet-worker'
     static_configs:
-      - targets: [ 'gofleet-worker:2112' ]
+      - targets: ['gofleet_worker:2112']
