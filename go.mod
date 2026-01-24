@@ -9,6 +9,7 @@ require (
 	github.com/rabbitmq/amqp091-go v1.10.0
 	github.com/redis/go-redis/v9 v9.17.2
 	github.com/riandyrn/otelchi v0.12.2
+	github.com/sony/gobreaker v1.0.0
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.64.0
