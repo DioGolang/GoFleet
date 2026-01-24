@@ -6,15 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"github.com/DioGolang/GoFleet/configs"
-	"github.com/DioGolang/GoFleet/internal/application/usecase"
+	"github.com/DioGolang/GoFleet/internal/application/usecase/order"
 	"github.com/DioGolang/GoFleet/internal/domain/event"
 	"github.com/DioGolang/GoFleet/internal/infra/database"
 	infraEvent "github.com/DioGolang/GoFleet/internal/infra/event"
-	"github.com/DioGolang/GoFleet/internal/infra/web"
+	"github.com/DioGolang/GoFleet/internal/infra/web/handler"
+	middlewareWrapper "github.com/DioGolang/GoFleet/internal/infra/web/middleware"
+	"github.com/DioGolang/GoFleet/pkg/metrics"
 	"github.com/DioGolang/GoFleet/pkg/otel"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	_ "github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/riandyrn/otelchi"
 	"log"
@@ -40,6 +44,19 @@ func main() {
 		log.Fatalf("failed to init OTel: %v", err)
 	}
 	defer shutdownOtel()
+
+	// METRICS
+	reg := prometheus.NewRegistry()
+	prometheusMetrics := metrics.NewPrometheusMetrics(reg, config.OtelServiceName)
+
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+		err = http.ListenAndServe(":2112", mux)
+		if err != nil {
+			return
+		}
+	}()
 
 	// DATABASE (PostgreSQL)
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -109,15 +126,19 @@ func main() {
 	orderRepository := database.NewOrderRepository(db)
 	orderCreated := event.NewOrderCreated()
 	eventDispatcher := infraEvent.NewDispatcher(ch)
-	createOrderUseCase := usecase.NewCreateOrderUseCase(orderRepository, orderCreated, eventDispatcher)
-	orderHandler := web.NewOrderHandler(createOrderUseCase)
+	createOrderUseCase := order.NewCreateOrderUseCase(orderRepository, orderCreated, eventDispatcher)
+	createOrderUseCaseWithMetrics := &order.CreateOrderMetricsDecorator{
+		Next:    createOrderUseCase,
+		Metrics: prometheusMetrics,
+	}
+	orderHandler := handler.NewOrderHandler(createOrderUseCaseWithMetrics)
 
 	// ROUTER COM OTEL MIDDLEWARE
 	r := chi.NewRouter()
 	r.Use(otelchi.Middleware(config.OtelServiceName, otelchi.WithChiRoutes(r)))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-
+	r.Use(middlewareWrapper.MetricsWrapper(prometheusMetrics))
 	r.Post("/api/v1/orders", orderHandler.Create)
 
 	// HTTP SERVER SHUTDOWN
