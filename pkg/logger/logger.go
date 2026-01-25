@@ -17,10 +17,11 @@ type Field struct {
 	Kind  FieldType
 }
 
-func String(k, v string) Field  { return Field{Key: k, Value: v, Kind: KindString} }
-func Int(k string, v int) Field { return Field{Key: k, Value: v, Kind: KindInt} }
-func Any(k string, v any) Field { return Field{Key: k, Value: v, Kind: KindAny} }
-func WithError(err error) Field { return Field{Key: "error", Value: err, Kind: KindError} }
+func String(k, v string) Field          { return Field{Key: k, Value: v, Kind: KindString} }
+func Int(k string, v int) Field         { return Field{Key: k, Value: v, Kind: KindInt} }
+func Any(k string, v any) Field         { return Field{Key: k, Value: v, Kind: KindAny} }
+func WithError(err error) Field         { return Field{Key: "error", Value: err, Kind: KindError} }
+func Lazy(k string, f func() any) Field { return Field{Key: k, Value: f, Kind: KindAny} }
 
 type Logger interface {
 	Debug(ctx context.Context, msg string, fields ...Field)
