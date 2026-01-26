@@ -49,11 +49,11 @@ graph LR
         DockerOutput -.->|Tail| Promtail
         Promtail -.->|Push| Loki
     end
-    
-    Jaeger --> Grafana
-    Prometheus --> Grafana
-    Loki --> Grafana
+   
 ```
+Jaeger --> Grafana
+Prometheus --> Grafana
+Loki --> Grafana
 
 ---
 
