@@ -22,6 +22,26 @@ services:
       - "9090:9090" # UI do Prometheus
     restart: on-failure
 
+  loki:
+    image: grafana/loki:3.6.4
+    container_name: gofleet_loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.6.4
+    container_name: gofleet_promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./promtail-config.yaml:/etc/promtail/config.yaml
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      - loki
+    restart: unless-stopped
+
   grafana:
     image: grafana/grafana:latest
     container_name: gofleet_grafana
@@ -34,6 +54,7 @@ services:
       - GF_PLUGINS_PREINSTALL=grafana-clock-panel
     depends_on:
       - prometheus
+      - loki
     restart: unless-stopped
   # --- INFRASTRUCTURE ---
   postgres:
