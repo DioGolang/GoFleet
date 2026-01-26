@@ -103,6 +103,11 @@ func (z *zapLogger) convertFields(fields []Field) []zap.Field {
 				out[i] = zap.Int(f.Key, v)
 				continue
 			}
+		case KindFloat64:
+			if v, ok := val.(float64); ok {
+				out[i] = zap.Float64(f.Key, v)
+				continue
+			}
 		case KindError:
 			if v, ok := val.(error); ok {
 				out[i] = zap.Error(v)
