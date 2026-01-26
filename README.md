@@ -32,7 +32,9 @@ O sistema é um monorepo composto por três microsserviços principais:
 ### Fluxo de Observabilidade e Dados
 
 ```mermaid
-subgraph Observability Pipeline
+graph LR
+
+subgraph Observability_Pipeline
     direction TB
 
     API -.->|Traces (OTLP)| Jaeger
@@ -50,7 +52,6 @@ subgraph Observability Pipeline
     DockerOutput -.->|Tail| Promtail
     Promtail -.->|Push| Loki
 end
-
 ```
 Jaeger --> Grafana
 Prometheus --> Grafana
