@@ -7,6 +7,7 @@ type FieldType int
 const (
 	KindString FieldType = iota
 	KindInt
+	KindFloat64
 	KindError
 	KindAny
 )
@@ -19,6 +20,7 @@ type Field struct {
 
 func String(k, v string) Field          { return Field{Key: k, Value: v, Kind: KindString} }
 func Int(k string, v int) Field         { return Field{Key: k, Value: v, Kind: KindInt} }
+func Float64(k string, v float64) Field { return Field{Key: k, Value: v, Kind: KindFloat64} }
 func Any(k string, v any) Field         { return Field{Key: k, Value: v, Kind: KindAny} }
 func WithError(err error) Field         { return Field{Key: "error", Value: err, Kind: KindError} }
 func Lazy(k string, f func() any) Field { return Field{Key: k, Value: f, Kind: KindAny} }
