@@ -92,7 +92,7 @@ func main() {
 		fail("rabbitmq connection failed", err)
 	}
 	defer func(conn *amqp.Connection) {
-		fmt.Println("Closing RabbitMQ...")
+		zapLogger.Info(ctx, "Closing RabbitMQ...")
 		err := conn.Close()
 		if err != nil {
 			fmt.Printf("Error closing RabbitMQ: %v\n", err)
@@ -104,7 +104,7 @@ func main() {
 		fail("rabbitmq channel failed", err)
 	}
 	defer func(ch *amqp.Channel) {
-		fmt.Println("Closing rabbitmq channel...")
+		zapLogger.Info(ctx, "Closing rabbitmq channel...")
 		err := ch.Close()
 		if err != nil {
 			fmt.Printf("Error closing rabbitmq channel: %v\n", err)
@@ -137,7 +137,7 @@ func main() {
 	// DEPENDENCIES & HANDLERS
 	orderRepository := database.NewOrderRepository(db)
 	orderCreated := event.NewOrderCreated()
-	eventDispatcher := infraEvent.NewDispatcher(ch)
+	eventDispatcher := infraEvent.NewDispatcher(ch, zapLogger)
 	createOrderUseCase := order.NewCreateOrderUseCase(orderRepository, orderCreated, eventDispatcher, zapLogger)
 	createOrderUseCaseWithMetrics := &order.CreateOrderMetricsDecorator{
 		Next:    createOrderUseCase,
@@ -148,7 +148,7 @@ func main() {
 	// ROUTER COM OTEL MIDDLEWARE
 	r := chi.NewRouter()
 	r.Use(otelchi.Middleware(config.OtelServiceName, otelchi.WithChiRoutes(r)))
-	r.Use(middleware.Logger)
+	//r.Use(middleware.Logger)
 	r.Use(middlewareMetrics.MetricsWrapper(prometheusMetrics))
 	r.Use(middlewareMetrics.RequestLogger(zapLogger))
 	r.Use(middleware.Recoverer)
@@ -161,14 +161,16 @@ func main() {
 	}
 
 	go func() {
-		fmt.Println("Server running on port", config.WebServerPort)
+		zapLogger.Info(ctx, "Server running on port", logger.String("WebServerPort", config.WebServerPort))
+
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fail("listen: %s\n", err)
 		}
 	}()
 
 	<-ctx.Done()
-	fmt.Println("\nShutting down gracefully...")
+
+	zapLogger.Info(ctx, "\nShutting down gracefully...")
 
 	// Timeout to finish pending requests
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -177,5 +179,5 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		fail("Server forced to shutdown", err)
 	}
-	fmt.Println("Server exited cleanly")
+	zapLogger.Info(ctx, "Server exited cleanly")
 }
