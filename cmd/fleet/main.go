@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/DioGolang/GoFleet/internal/infra/database"
 	"github.com/DioGolang/GoFleet/pkg/logger"
 	"log"
 	"net"
@@ -63,8 +64,10 @@ func main() {
 		}
 	}(rdb)
 
+	locationRepo := database.NewRedisLocationRepository(rdb, zapLogger)
+
 	// Service & Seeding
-	fleetService := service.NewFleetService(rdb)
+	fleetService := service.NewFleetService(locationRepo, zapLogger)
 	setupSeedData(ctx, fleetService)
 
 	// gRPC Server com Interceptor OTel
