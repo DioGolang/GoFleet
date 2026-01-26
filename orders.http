@@ -1,5 +1,5 @@
 ### POST
-GET http://http://localhost:8000/api/v1/orders
+GET http://localhost:8000/api/v1/orders
 Content-Type: application/json
 
 {
