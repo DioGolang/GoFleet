@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/DioGolang/GoFleet/pkg/events"
+	"github.com/DioGolang/GoFleet/pkg/logger"
 	carrier "github.com/DioGolang/GoFleet/pkg/otel"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
@@ -12,18 +13,27 @@ import (
 
 type Dispatcher struct {
 	RabbitMQChannel *amqp.Channel
+	Logger          logger.Logger
 }
 
-func NewDispatcher(ch *amqp.Channel) *Dispatcher {
-	return &Dispatcher{RabbitMQChannel: ch}
+func NewDispatcher(ch *amqp.Channel, log logger.Logger) *Dispatcher {
+	return &Dispatcher{RabbitMQChannel: ch, Logger: log}
 }
 
 func (ed *Dispatcher) Dispatch(ctx context.Context, event events.Event) error {
 	headers := make(amqp.Table)
 	otel.GetTextMapPropagator().Inject(ctx, carrier.AMQPHeadersCarrier(headers))
 
+	ed.Logger.Debug(ctx, "Preparing to publish event",
+		logger.String("event", event.GetName()),
+	)
+
 	payload, err := json.Marshal(event.GetPayload())
 	if err != nil {
+		ed.Logger.Error(ctx, "Failed to marshal event payload",
+			logger.String("event", event.GetName()),
+			logger.WithError(err),
+		)
 		return err
 	}
 
@@ -39,7 +49,20 @@ func (ed *Dispatcher) Dispatch(ctx context.Context, event events.Event) error {
 			Timestamp:   time.Now(),
 			Body:        payload,
 		})
-	return err
+	if err != nil {
+		ed.Logger.Error(ctx, "Failed to publish message to RabbitMQ",
+			logger.String("event", event.GetName()),
+			logger.WithError(err),
+		)
+		return err
+	}
+
+	ed.Logger.Info(ctx, "Event published to RabbitMQ",
+		logger.String("event", event.GetName()),
+		logger.String("exchange", "amq.direct"),
+		logger.String("routing_key", "orders.created"),
+	)
+	return nil
 }
 
 func (ed *Dispatcher) Register(eventName string, handler events.EventHandler) error { return nil }
