@@ -18,7 +18,7 @@
 
 
 O **GoFleet** é um backend de alta performance projetado para demonstrar padrões avançados de engenharia de software, incluindo **Distributed Tracing**, **Metrics Instrumentation** e **State Pattern**. O sistema orquestra a criação de pedidos, processamento assíncrono e geolocalização de motoristas.
-
+O diferencial deste projeto é a **Observabilidade Completa**: Logs, Métricas e Traces são correlacionados automaticamente através de toda a malha de serviços.
 ---
 
 ## 🏗️ Arquitetura
@@ -34,21 +34,25 @@ O sistema é um monorepo composto por três microsserviços principais:
 ```mermaid
 graph LR
     Client -->|HTTP POST| API[API Service]
-    API -->|Decorated UseCase| Metrics[Prometheus]
-    API -->|Propagated Context| RabbitMQ[(RabbitMQ)]
+    API -->|Publish| RabbitMQ[(RabbitMQ)]
     
     RabbitMQ -->|Consume| Worker[Worker Service]
-    Worker -->|Trace Context| Fleet[Fleet Service - gRPC]
+    Worker -->|gRPC| Fleet[Fleet Service]
     Fleet -->|GeoSearch| Redis[(Redis)]
     Worker -->|SQLC| DB[(PostgreSQL)]
     
-    subgraph Observability_Stack
-        API -.->|OTLP| Jaeger
-        Worker -.->|OTLP| Jaeger
-        Fleet -.->|OTLP| Jaeger
-        Prometheus -.->|Scrape 2112| API
-        Prometheus -.->|Scrape 2112| Worker
+    subgraph Observability Pipeline
+        direction TB
+        API & Worker & Fleet -.->|Traces (OTLP)| Jaeger
+        API & Worker & Fleet -.->|Metrics (Pull)| Prometheus
+        API & Worker & Fleet -.->|Logs (JSON)| DockerOutput
+        DockerOutput -.->|Tail| Promtail
+        Promtail -.->|Push| Loki
     end
+    
+    Jaeger --> Grafana
+    Prometheus --> Grafana
+    Loki --> Grafana
 ```
 
 ---
@@ -62,8 +66,9 @@ graph LR
 * **Cache/Geo**: Redis + Go-Redis (GeoSpatial Indexing)
 * **Observabilidade**:
 * **Tracing**: OpenTelemetry (OTel) com Jaeger.
+* **Logs**: (JSON estruturado) -> Promtail -> Loki
+* **Grafana**: Visualização unificada.
 * **Metrics**: Prometheus (Custom Registry & Decorators).
-* **Logs**: Zap (Estruturados com TraceID).
 
 ---
 
@@ -158,6 +163,14 @@ Definimos uma interface explícita para métricas.
 
 * **Arquivo**: `pkg/metrics/metrics.go`
 * **Benefício**: Permite trocar o provedor de métricas (ex: de Prometheus para Datadog) sem alterar uma linha de código nos Use Cases, apenas trocando a implementação injetada no `main.go`.
+
+### 4. Correlação de Logs e Traces
+
+Implementamos um Logger Wrapper (pkg/logger) usando Uber Zap.
+
+* **Decisão**: Todos os logs são estruturados em JSON.
+* **Mágica**: O logger verifica automaticamente se existe um context.Context com um Span ativo. Se houver, ele injeta trace_id e span_id no log.
+* **Resultado**: No Grafana, você pode visualizar um Trace e clicar para ver "Logs for this Trace", unindo infraestrutura e aplicação.
 
 ---
 
