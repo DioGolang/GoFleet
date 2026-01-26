@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/DioGolang/GoFleet/pkg/logger"
 	"log"
 	"net"
 	"os"
@@ -29,10 +30,18 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	//LOG
+	zapLogger := logger.NewZapLogger(config.OtelServiceName, false)
+	zapLogger.Info(ctx, "Fleet initializing...")
+	fail := func(msg string, err error) {
+		zapLogger.Error(ctx, msg, logger.WithError(err))
+		os.Exit(1)
+	}
+
 	// Setup OpenTelemetry
 	shutdownOtel, err := otel.InitProvider(ctx, config.OtelServiceName, config.OtelExporterOTLPEndpoint)
 	if err != nil {
-		log.Fatalf("failed to init OTel: %v", err)
+		fail("failed to init OTel", err)
 	}
 	defer shutdownOtel()
 
@@ -44,13 +53,13 @@ func main() {
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := rdb.Ping(pingCtx).Err(); err != nil {
-		log.Fatalf("failed to connect to Redis: %v", err)
+		fail("failed to connect to Redis: %v", err)
 	}
 	defer func(rdb *redis.Client) {
 		fmt.Println("Closing redis...")
 		err := rdb.Close()
 		if err != nil {
-			fmt.Printf("Error closing redis: %v\n", err)
+			zapLogger.Error(ctx, "Error closing redis", logger.WithError(err))
 		}
 	}(rdb)
 
@@ -61,7 +70,7 @@ func main() {
 	// gRPC Server com Interceptor OTel
 	lis, err := net.Listen("tcp", ":"+config.FleetPort)
 	if err != nil {
-		log.Fatalf("failed to listen on port %s: %v", config.FleetPort, err)
+		fail("failed to listen on port", err)
 	}
 
 	grpcServer := grpc.NewServer(
@@ -73,18 +82,18 @@ func main() {
 
 	// Start gRPC Server
 	go func() {
-		log.Printf("Fleet gRPC Server running on port %s", config.FleetPort)
+		zapLogger.Info(ctx, "Fleet gRPC Server running on port", logger.String("FleetPort", config.FleetPort))
 		if err := grpcServer.Serve(lis); err != nil {
-			log.Printf("gRPC server error: %v", err)
+			zapLogger.Error(ctx, "Fleet gRPC Server running on port", logger.WithError(err))
 		}
 	}()
 
 	// 8. Graceful Shutdown
 	<-ctx.Done()
-	log.Println("Shutting down fleet service...")
+	zapLogger.Info(ctx, "Shutting down fleet service...")
 
 	grpcServer.GracefulStop()
-	log.Println("Service exited cleanly")
+	zapLogger.Info(ctx, "Service exited cleanly")
 }
 
 func setupSeedData(ctx context.Context, s *service.FleetService) {
