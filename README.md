@@ -32,24 +32,25 @@ O sistema é um monorepo composto por três microsserviços principais:
 ### Fluxo de Observabilidade e Dados
 
 ```mermaid
-graph LR
-    Client -->|HTTP POST| API[API Service]
-    API -->|Publish| RabbitMQ[(RabbitMQ)]
-    
-    RabbitMQ -->|Consume| Worker[Worker Service]
-    Worker -->|gRPC| Fleet[Fleet Service]
-    Fleet -->|GeoSearch| Redis[(Redis)]
-    Worker -->|SQLC| DB[(PostgreSQL)]
-    
-    subgraph Observability Pipeline
-        direction TB
-        API & Worker & Fleet -.->|Traces (OTLP)| Jaeger
-        API & Worker & Fleet -.->|Metrics (Pull)| Prometheus
-        API & Worker & Fleet -.->|Logs (JSON)| DockerOutput
-        DockerOutput -.->|Tail| Promtail
-        Promtail -.->|Push| Loki
-    end
-   
+subgraph Observability Pipeline
+    direction TB
+
+    API -.->|Traces (OTLP)| Jaeger
+    Worker -.->|Traces (OTLP)| Jaeger
+    Fleet -.->|Traces (OTLP)| Jaeger
+
+    API -.->|Metrics (Pull)| Prometheus
+    Worker -.->|Metrics (Pull)| Prometheus
+    Fleet -.->|Metrics (Pull)| Prometheus
+
+    API -.->|Logs (JSON)| DockerOutput
+    Worker -.->|Logs (JSON)| DockerOutput
+    Fleet -.->|Logs (JSON)| DockerOutput
+
+    DockerOutput -.->|Tail| Promtail
+    Promtail -.->|Push| Loki
+end
+
 ```
 Jaeger --> Grafana
 Prometheus --> Grafana
