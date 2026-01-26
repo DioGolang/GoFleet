@@ -7,8 +7,8 @@ import (
 	"github.com/DioGolang/GoFleet/internal/application/port/outbound"
 	"github.com/DioGolang/GoFleet/internal/application/usecase/order"
 	"github.com/DioGolang/GoFleet/internal/infra/grpc/pb"
+	"github.com/DioGolang/GoFleet/pkg/logger"
 	carrier "github.com/DioGolang/GoFleet/pkg/otel"
-	"log"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -21,13 +21,20 @@ type Consumer struct {
 	Conn            *amqp.Connection
 	GrpcClient      pb.FleetServiceClient
 	OrderRepository outbound.OrderRepository
+	Logger          logger.Logger
 }
 
-func NewConsumer(conn *amqp.Connection, grpcClient pb.FleetServiceClient, repo outbound.OrderRepository) *Consumer {
+func NewConsumer(
+	conn *amqp.Connection,
+	grpcClient pb.FleetServiceClient,
+	repo outbound.OrderRepository,
+	l logger.Logger,
+) *Consumer {
 	return &Consumer{
 		Conn:            conn,
 		GrpcClient:      grpcClient,
 		OrderRepository: repo,
+		Logger:          l,
 	}
 }
 
@@ -59,7 +66,6 @@ func (c *Consumer) Start(queueName string) error {
 
 	go func() {
 		for d := range msgs {
-			fmt.Printf("📦 I received message. Processing...\n")
 			amqpCarrier := carrier.AMQPHeadersCarrier(d.Headers)
 			ctx := context.Background()
 			ctx = otel.GetTextMapPropagator().Extract(ctx, amqpCarrier)
@@ -67,11 +73,16 @@ func (c *Consumer) Start(queueName string) error {
 			tracer := otel.GetTracerProvider().Tracer("worker-tracer")
 			ctx, span := tracer.Start(ctx, "ProcessOrder", trace.WithAttributes(
 				attribute.String("queue.name", queueName),
+				attribute.String("messaging.message_id", d.MessageId),
 			))
+
+			c.Logger.Info(ctx, "Received message from queue",
+				logger.String("queue", queueName),
+			)
 
 			var orderDTO order.CreateOutput
 			if err := json.Unmarshal(d.Body, &orderDTO); err != nil {
-				log.Printf("Erro parse JSON: %v", err)
+				c.Logger.Error(ctx, "Failed to unmarshal event body", logger.WithError(err))
 				span.RecordError(err)
 				span.End()
 				d.Nack(false, false)
@@ -79,22 +90,28 @@ func (c *Consumer) Start(queueName string) error {
 			}
 
 			span.SetAttributes(attribute.String("order.id", orderDTO.ID))
+			c.Logger.Debug(ctx, "Searching for driver...", logger.String("order_id", orderDTO.ID))
 			ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
 			res, err := c.GrpcClient.SearchDriver(ctxTimeout, &pb.SearchDriverRequest{OrderId: orderDTO.ID})
 			cancel()
 
 			if err != nil {
-				log.Printf("❌ No drivers found: %v. Trying again later...", err)
-				span.RecordError(err)
+				c.Logger.Warn(ctx, "No drivers found, retrying later",
+					logger.String("order_id", orderDTO.ID),
+					logger.WithError(err),
+				)
 				span.End()
 				d.Nack(false, true)
 				continue
 			}
 
-			fmt.Printf("Driver found: %s. Updating bank...\n", res.Name)
+			c.Logger.Info(ctx, "Driver found",
+				logger.String("driver_name", res.Name),
+				logger.String("driver_id", res.DriverId),
+			)
 			err = c.OrderRepository.UpdateStatus(ctx, orderDTO.ID, "DISPATCHED", res.DriverId)
 			if err != nil {
-				log.Printf("Error saving to bank: %v", err)
+				c.Logger.Error(ctx, "Failed to update order status in DB", logger.WithError(err))
 				span.RecordError(err)
 				span.End()
 				d.Nack(false, true)
@@ -102,12 +119,15 @@ func (c *Consumer) Start(queueName string) error {
 			}
 
 			d.Ack(false)
-			fmt.Printf("Order %s dispatched successfully!\n", orderDTO.ID)
+			c.Logger.Info(ctx, "Order dispatched successfully",
+				logger.String("order_id", orderDTO.ID),
+				logger.Float64("final_price", orderDTO.FinalPrice),
+			)
 			span.End()
 		}
 	}()
-
-	fmt.Println(" [*] Waiting for messages. To exit press CTRL+C")
+	
+	c.Logger.Info(context.Background(), "[*] Waiting for messages. To exit press CTRL+C", logger.String("queue", queueName))
 	<-forever
 
 	return nil
