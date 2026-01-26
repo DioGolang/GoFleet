@@ -37,17 +37,17 @@ graph LR
 subgraph Observability_Pipeline
     direction TB
 
-    API -.->|Traces (OTLP)| Jaeger
-    Worker -.->|Traces (OTLP)| Jaeger
-    Fleet -.->|Traces (OTLP)| Jaeger
+    API -.->|Traces OTLP| Jaeger
+    Worker -.->|Traces OTLP| Jaeger
+    Fleet -.->|Traces OTLP| Jaeger
 
-    API -.->|Metrics (Pull)| Prometheus
-    Worker -.->|Metrics (Pull)| Prometheus
-    Fleet -.->|Metrics (Pull)| Prometheus
+    API -.->|Metrics Pull| Prometheus
+    Worker -.->|Metrics Pull| Prometheus
+    Fleet -.->|Metrics Pull| Prometheus
 
-    API -.->|Logs (JSON)| DockerOutput
-    Worker -.->|Logs (JSON)| DockerOutput
-    Fleet -.->|Logs (JSON)| DockerOutput
+    API -.->|Logs JSON| DockerOutput
+    Worker -.->|Logs JSON| DockerOutput
+    Fleet -.->|Logs JSON| DockerOutput
 
     DockerOutput -.->|Tail| Promtail
     Promtail -.->|Push| Loki
