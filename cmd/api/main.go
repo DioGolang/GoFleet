@@ -143,14 +143,15 @@ func main() {
 		Next:    createOrderUseCase,
 		Metrics: prometheusMetrics,
 	}
-	orderHandler := handler.NewOrderHandler(createOrderUseCaseWithMetrics)
+	orderHandler := handler.NewOrderHandler(createOrderUseCaseWithMetrics, zapLogger)
 
 	// ROUTER COM OTEL MIDDLEWARE
 	r := chi.NewRouter()
 	r.Use(otelchi.Middleware(config.OtelServiceName, otelchi.WithChiRoutes(r)))
 	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
 	r.Use(middlewareMetrics.MetricsWrapper(prometheusMetrics))
+	r.Use(middlewareMetrics.RequestLogger(zapLogger))
+	r.Use(middleware.Recoverer)
 	r.Post("/api/v1/orders", orderHandler.Create)
 
 	// HTTP SERVER SHUTDOWN
