@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/DioGolang/GoFleet/pkg/logger"
 	"log"
 	"os"
 	"os/signal"
@@ -31,10 +32,18 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	//LOG
+	zapLogger := logger.NewZapLogger(config.OtelServiceName, false)
+	zapLogger.Info(ctx, "Worker initializing...")
+	fail := func(msg string, err error) {
+		zapLogger.Error(ctx, msg, logger.WithError(err))
+		os.Exit(1)
+	}
+
 	// OpenTelemetry Provider
 	shutdownOtel, err := otel.InitProvider(ctx, config.OtelServiceName, config.OtelExporterOTLPEndpoint)
 	if err != nil {
-		log.Fatalf("failed to init OTel: %v", err)
+		fail("failed to init OTel", err)
 	}
 	defer shutdownOtel()
 
@@ -43,13 +52,13 @@ func main() {
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
 	db, err := sql.Open(config.DBDriver, dsn)
 	if err != nil {
-		log.Fatalf("db connection failed: %v", err)
+		fail("db connection failed: %v", err)
 	}
 	defer func(db *sql.DB) {
-		fmt.Println("Closing Database...")
+		zapLogger.Info(ctx, "Closing Database...")
 		err := db.Close()
 		if err != nil {
-			fmt.Printf("Error closing database: %v\n", err)
+			zapLogger.Error(ctx, "Error closing database", logger.WithError(err))
 		}
 	}(db)
 
@@ -78,24 +87,25 @@ func main() {
 	rabbitURL := fmt.Sprintf("amqp://guest:guest@%s:%s/", config.RabbitMQHost, config.AMQPort)
 	conn, err := amqp.Dial(rabbitURL)
 	if err != nil {
-		log.Fatalf("rabbitmq connection failed: %v", err)
+		fail("rabbitmq connection failed", err)
 	}
 	defer func(conn *amqp.Connection) {
-		fmt.Println("Closing RabbitMQ...")
+		zapLogger.Info(ctx, "Closing RabbitMQ...")
 		err := conn.Close()
 		if err != nil {
-			fmt.Printf("Error closing RabbitMQ: %v\n", err)
+			zapLogger.Error(ctx, "Error closing RabbitMQ", logger.WithError(err))
 		}
 	}(conn)
 
 	// Consumer Logic
-	consumer := event.NewConsumer(conn, grpcClient, repository)
+	consumer := event.NewConsumer(conn, grpcClient, repository, zapLogger)
 
 	// consumer em uma goroutine para não bloquear o shutdown
 	errChan := make(chan error, 1)
 	go func() {
-		log.Printf("Worker [%s] consuming from orders.created...", config.OtelServiceName)
+		zapLogger.Info(ctx, "Starting consumer loop", logger.String("queue", "orders.created"))
 		if err := consumer.Start("orders.created"); err != nil {
+			zapLogger.Error(ctx, "Consumer failed", logger.WithError(err))
 			errChan <- err
 		}
 	}()
@@ -103,14 +113,14 @@ func main() {
 	// Wait for exit signal or error
 	select {
 	case <-ctx.Done():
-		log.Println("Worker stopping gracefully...")
+		zapLogger.Info(ctx, "Worker stopping gracefully....")
 	case err := <-errChan:
-		log.Fatalf("Worker consumer error: %v", err)
+		fail("Worker consumer error", err)
 	}
 
 	//
 	_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	log.Println("Worker exited")
+	zapLogger.Info(ctx, "Worker exited")
 }
