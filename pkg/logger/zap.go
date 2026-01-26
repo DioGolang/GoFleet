@@ -12,7 +12,7 @@ type zapLogger struct {
 	log *zap.Logger
 }
 
-func NewLogger(serviceName string, isProd bool) Logger {
+func NewZapLogger(serviceName string, isProd bool) Logger {
 	var config zapcore.EncoderConfig
 	var level zapcore.Level
 
