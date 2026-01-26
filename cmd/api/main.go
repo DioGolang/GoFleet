@@ -11,7 +11,8 @@ import (
 	"github.com/DioGolang/GoFleet/internal/infra/database"
 	infraEvent "github.com/DioGolang/GoFleet/internal/infra/event"
 	"github.com/DioGolang/GoFleet/internal/infra/web/handler"
-	middlewareWrapper "github.com/DioGolang/GoFleet/internal/infra/web/middleware"
+	middlewareMetrics "github.com/DioGolang/GoFleet/internal/infra/web/middleware"
+	"github.com/DioGolang/GoFleet/pkg/logger"
 	"github.com/DioGolang/GoFleet/pkg/metrics"
 	"github.com/DioGolang/GoFleet/pkg/otel"
 	"github.com/go-chi/chi/v5"
@@ -38,7 +39,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 2. SETUP OpenTelemetry
+	// SETUP OpenTelemetry
 	shutdownOtel, err := otel.InitProvider(ctx, config.OtelServiceName, config.OtelExporterOTLPEndpoint)
 	if err != nil {
 		log.Fatalf("failed to init OTel: %v", err)
@@ -58,18 +59,29 @@ func main() {
 		}
 	}()
 
+	//LOG
+	zapLogger := logger.NewZapLogger(config.OtelServiceName, false)
+	fail := func(msg string, err error) {
+		zapLogger.Error(ctx, msg, logger.WithError(err))
+		os.Exit(1)
+	}
+	zapLogger.Info(ctx, "Application starting")
+
 	// DATABASE (PostgreSQL)
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
 	db, err := sql.Open(config.DBDriver, dsn)
 	if err != nil {
-		log.Fatalf("db connection failed: %v", err)
+		fail("db driver error", err)
+	}
+	if err := db.PingContext(ctx); err != nil {
+		fail("db connection unreachable", err)
 	}
 	defer func(db *sql.DB) {
-		fmt.Println("Closing Database...")
+		zapLogger.Info(ctx, "Closing Database...")
 		err := db.Close()
 		if err != nil {
-			fmt.Printf("Error closing database: %v\n", err)
+			fail("Error closing database", err)
 		}
 	}(db)
 
@@ -77,7 +89,7 @@ func main() {
 	rabbitURL := fmt.Sprintf("amqp://guest:guest@%s:%s/", config.RabbitMQHost, config.AMQPort)
 	conn, err := amqp.Dial(rabbitURL)
 	if err != nil {
-		log.Fatalf("rabbitmq connection failed: %v", err)
+		fail("rabbitmq connection failed", err)
 	}
 	defer func(conn *amqp.Connection) {
 		fmt.Println("Closing RabbitMQ...")
@@ -89,7 +101,7 @@ func main() {
 
 	ch, err := conn.Channel()
 	if err != nil {
-		log.Fatalf("rabbitmq channel failed: %v", err)
+		fail("rabbitmq channel failed", err)
 	}
 	defer func(ch *amqp.Channel) {
 		fmt.Println("Closing rabbitmq channel...")
@@ -126,7 +138,7 @@ func main() {
 	orderRepository := database.NewOrderRepository(db)
 	orderCreated := event.NewOrderCreated()
 	eventDispatcher := infraEvent.NewDispatcher(ch)
-	createOrderUseCase := order.NewCreateOrderUseCase(orderRepository, orderCreated, eventDispatcher)
+	createOrderUseCase := order.NewCreateOrderUseCase(orderRepository, orderCreated, eventDispatcher, zapLogger)
 	createOrderUseCaseWithMetrics := &order.CreateOrderMetricsDecorator{
 		Next:    createOrderUseCase,
 		Metrics: prometheusMetrics,
@@ -138,7 +150,7 @@ func main() {
 	r.Use(otelchi.Middleware(config.OtelServiceName, otelchi.WithChiRoutes(r)))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middlewareWrapper.MetricsWrapper(prometheusMetrics))
+	r.Use(middlewareMetrics.MetricsWrapper(prometheusMetrics))
 	r.Post("/api/v1/orders", orderHandler.Create)
 
 	// HTTP SERVER SHUTDOWN
@@ -150,7 +162,7 @@ func main() {
 	go func() {
 		fmt.Println("Server running on port", config.WebServerPort)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("listen: %s\n", err)
+			fail("listen: %s\n", err)
 		}
 	}()
 
@@ -162,7 +174,7 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		fail("Server forced to shutdown", err)
 	}
 	fmt.Println("Server exited cleanly")
 }
