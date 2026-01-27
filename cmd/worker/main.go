@@ -4,7 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
 	"github.com/DioGolang/GoFleet/pkg/logger"
+	"github.com/DioGolang/GoFleet/pkg/metrics"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sony/gobreaker"
+
 	"log"
 	"os"
 	"os/signal"
@@ -47,6 +52,10 @@ func main() {
 	}
 	defer shutdownOtel()
 
+	//Metrics
+	reg := prometheus.NewRegistry()
+	promMetris := metrics.NewPrometheusMetrics(reg, config.OtelServiceName)
+
 	// Postgres Connection
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
@@ -83,7 +92,29 @@ func main() {
 	}(grpcConn)
 	grpcClient := pb.NewFleetServiceClient(grpcConn)
 
-	// 5. RabbitMQ Connection
+	// Config Circuit Breaker
+	cbSettings := gobreaker.Settings{
+		Name:        "FleetService-CircuitBreaker",
+		MaxRequests: 5,
+		Interval:    10 * time.Second,
+		Timeout:     30 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			// Open the circuit if there are more than 10 requests AND 60% failure
+			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+			return counts.Requests >= 10 && failureRatio >= 6.0
+		},
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			zapLogger.Warn(context.Background(), "Circuit Breaker State Changed",
+				logger.String("name", name),
+				logger.String("from", from.String()),
+				logger.String("to", to.String()),
+			)
+		},
+	}
+
+	circuitBreaker := gobreaker.NewCircuitBreaker(cbSettings)
+
+	// RabbitMQ Connection
 	rabbitURL := fmt.Sprintf("amqp://guest:guest@%s:%s/", config.RabbitMQHost, config.AMQPort)
 	conn, err := amqp.Dial(rabbitURL)
 	if err != nil {
@@ -100,11 +131,21 @@ func main() {
 	// Consumer Logic
 	consumer := event.NewConsumer(conn, grpcClient, repository, zapLogger)
 
+	realHandler := consumer.ProcessOrder
+
+	resilientHandler := event.WrapResilientConsumer(
+		promMetris,
+		"WorkerProcessOrder",
+		5*time.Second,
+		circuitBreaker,
+		realHandler,
+	)
+
 	// consumer em uma goroutine para não bloquear o shutdown
 	errChan := make(chan error, 1)
 	go func() {
 		zapLogger.Info(ctx, "Starting consumer loop", logger.String("queue", "orders.created"))
-		if err := consumer.Start("orders.created"); err != nil {
+		if err := consumer.Start("orders.created", resilientHandler); err != nil {
 			zapLogger.Error(ctx, "Consumer failed", logger.WithError(err))
 			errChan <- err
 		}
