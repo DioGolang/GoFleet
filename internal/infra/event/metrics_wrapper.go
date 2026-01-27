@@ -9,8 +9,6 @@ import (
 	"github.com/sony/gobreaker"
 )
 
-type MessageHandler func(ctx context.Context, msg []byte) error
-
 func WrapResilientConsumer(
 	m metrics.Metrics,
 	handlerName string,
