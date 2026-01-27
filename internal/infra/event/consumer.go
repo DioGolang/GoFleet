@@ -3,13 +3,15 @@ package event
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+
 	"github.com/DioGolang/GoFleet/internal/application/port/outbound"
 	"github.com/DioGolang/GoFleet/internal/application/usecase/order"
 	"github.com/DioGolang/GoFleet/internal/infra/grpc/pb"
 	"github.com/DioGolang/GoFleet/pkg/logger"
 	carrier "github.com/DioGolang/GoFleet/pkg/otel"
-	"time"
+	"github.com/sony/gobreaker"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
@@ -38,7 +40,7 @@ func NewConsumer(
 	}
 }
 
-func (c *Consumer) Start(queueName string) error {
+func (c *Consumer) Start(queueName string, handler MessageHandler) error {
 	ch, err := c.Conn.Channel()
 	if err != nil {
 		return err
@@ -80,53 +82,21 @@ func (c *Consumer) Start(queueName string) error {
 				logger.String("queue", queueName),
 			)
 
-			var orderDTO order.CreateOutput
-			if err := json.Unmarshal(d.Body, &orderDTO); err != nil {
-				c.Logger.Error(ctx, "Failed to unmarshal event body", logger.WithError(err))
-				span.RecordError(err)
-				span.End()
-				d.Nack(false, false)
-				continue
-			}
-
-			span.SetAttributes(attribute.String("order.id", orderDTO.ID))
-			c.Logger.Debug(ctx, "Searching for driver...", logger.String("order_id", orderDTO.ID))
-			ctxTimeout, cancel := context.WithTimeout(ctx, 5*time.Second)
-			res, err := c.GrpcClient.SearchDriver(ctxTimeout, &pb.SearchDriverRequest{OrderId: orderDTO.ID})
-			cancel()
+			err := handler(ctx, d.Body)
 
 			if err != nil {
-				c.Logger.Warn(ctx, "No drivers found, retrying later",
-					logger.String("order_id", orderDTO.ID),
-					logger.WithError(err),
-				)
-				span.End()
-				d.Nack(false, true)
-				continue
+				if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, context.DeadlineExceeded) {
+					c.Logger.Warn(ctx, "Resilience trigger: retrying message", logger.WithError(err))
+					d.Nack(false, true)
+				} else {
+					c.Logger.Error(ctx, "Fatal handler error: discarding message", logger.WithError(err))
+					d.Nack(false, false)
+				}
 			}
-
-			c.Logger.Info(ctx, "Driver found",
-				logger.String("driver_name", res.Name),
-				logger.String("driver_id", res.DriverId),
-			)
-			err = c.OrderRepository.UpdateStatus(ctx, orderDTO.ID, "DISPATCHED", res.DriverId)
-			if err != nil {
-				c.Logger.Error(ctx, "Failed to update order status in DB", logger.WithError(err))
-				span.RecordError(err)
-				span.End()
-				d.Nack(false, true)
-				continue
-			}
-
-			d.Ack(false)
-			c.Logger.Info(ctx, "Order dispatched successfully",
-				logger.String("order_id", orderDTO.ID),
-				logger.Float64("final_price", orderDTO.FinalPrice),
-			)
 			span.End()
 		}
 	}()
-	
+
 	c.Logger.Info(context.Background(), "[*] Waiting for messages. To exit press CTRL+C", logger.String("queue", queueName))
 	<-forever
 
@@ -144,6 +114,28 @@ func (c *Consumer) setupTopology(ch *amqp.Channel, queueName string) error {
 	)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+func (c *Consumer) ProcessOrder(ctx context.Context, msg []byte) error {
+	var orderDto order.CreateInput
+	if err := json.Unmarshal(msg, &orderDto); err != nil {
+		c.Logger.Error(ctx, "invalid json", logger.WithError(err))
+		return fmt.Errorf("invalid json: %w", err)
+	}
+
+	req := &pb.SearchDriverRequest{OrderId: orderDto.ID}
+	res, err := c.GrpcClient.SearchDriver(ctx, req)
+	if err != nil {
+		c.Logger.Error(ctx, "grpc search driver failed", logger.WithError(err))
+		return fmt.Errorf("grpc search driver failed: %w", err)
+	}
+
+	err = c.OrderRepository.UpdateStatus(ctx, orderDto.ID, "DISPATCHED", res.DriverId)
+	if err != nil {
+		c.Logger.Error(ctx, "db update failed", logger.WithError(err))
+		return fmt.Errorf("db update failed: %w", err)
 	}
 	return nil
 }
