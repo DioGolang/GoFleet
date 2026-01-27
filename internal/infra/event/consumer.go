@@ -104,14 +104,57 @@ func (c *Consumer) Start(queueName string, handler MessageHandler) error {
 }
 
 func (c *Consumer) setupTopology(ch *amqp.Channel, queueName string) error {
-	_, err := ch.QueueDeclare(
-		queueName,
+	dlxName := "dlx_exchange"
+	err := ch.ExchangeDeclare(
+		dlxName,
+		"direct",
 		true,
 		false,
 		false,
 		false,
 		nil,
 	)
+	if err != nil {
+		return fmt.Errorf("failed to declare dlx: %w", err)
+	}
+
+	waitQueueName := queueName + ".wait"
+	waitQueueArgs := amqp.Table{
+		"x-dead-letter-exchange":    "amq.direct",
+		"x-dead-letter-routing-key": queueName,
+		"x-message-ttl":             30000, // 30s(em ms)
+	}
+	_, err = ch.QueueDeclare(
+		waitQueueName,
+		true,
+		false,
+		false,
+		false,
+		waitQueueArgs,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare wait queue: %w", err)
+	}
+
+	err = ch.QueueBind(
+		waitQueueName, queueName, dlxName, false, nil,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to bind wait queue: %w", err)
+	}
+
+	mainQueueArgs := amqp.Table{
+		"x-dead-letter-exchange":    dlxName,
+		"x-dead-letter-routing-key": queueName,
+	}
+	_, err = ch.QueueDeclare(
+		queueName, true, false, false, false, mainQueueArgs,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare main queue: %w", err)
+	}
+
+	err = ch.QueueBind(queueName, queueName, "amq.direct", false, nil)
 	if err != nil {
 		return err
 	}
