@@ -54,7 +54,7 @@ func main() {
 
 	//Metrics
 	reg := prometheus.NewRegistry()
-	promMetris := metrics.NewPrometheusMetrics(reg, config.OtelServiceName)
+	promMetrics := metrics.NewPrometheusMetrics(reg, config.OtelServiceName)
 
 	// Postgres Connection
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -131,21 +131,30 @@ func main() {
 	// Consumer Logic
 	consumer := event.NewConsumer(conn, grpcClient, repository, zapLogger)
 
-	realHandler := consumer.ProcessOrder
+	handlerStack := consumer.ProcessOrder
 
-	resilientHandler := event.WrapResilientConsumer(
-		promMetris,
+	handlerStack = event.WrapResilientConsumer(
+		promMetrics,
 		"WorkerProcessOrder",
 		5*time.Second,
 		circuitBreaker,
-		realHandler,
+		handlerStack,
+	)
+
+	handlerStack = event.WrapExponentialBackoff(
+		zapLogger,
+		promMetrics,
+		"WorkerBackoff",
+		3,
+		1*time.Second,
+		handlerStack,
 	)
 
 	// consumer em uma goroutine para não bloquear o shutdown
 	errChan := make(chan error, 1)
 	go func() {
 		zapLogger.Info(ctx, "Starting consumer loop", logger.String("queue", "orders.created"))
-		if err := consumer.Start("orders.created", resilientHandler); err != nil {
+		if err := consumer.Start("orders.created", handlerStack); err != nil {
 			zapLogger.Error(ctx, "Consumer failed", logger.WithError(err))
 			errChan <- err
 		}
