@@ -3,12 +3,13 @@ package event
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	"github.com/DioGolang/GoFleet/pkg/events"
 	"github.com/DioGolang/GoFleet/pkg/logger"
 	carrier "github.com/DioGolang/GoFleet/pkg/otel"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"go.opentelemetry.io/otel"
-	"time"
 )
 
 type Dispatcher struct {
@@ -39,7 +40,7 @@ func (ed *Dispatcher) Dispatch(ctx context.Context, event events.Event) error {
 
 	err = ed.RabbitMQChannel.PublishWithContext(
 		ctx,
-		"amq.direct",
+		"orders_exchange",
 		"orders.created",
 		false,
 		false,
