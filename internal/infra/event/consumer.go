@@ -103,64 +103,6 @@ func (c *Consumer) Start(queueName string, handler MessageHandler) error {
 	return nil
 }
 
-func (c *Consumer) setupTopology(ch *amqp.Channel, queueName string) error {
-	dlxName := "dlx_exchange"
-	err := ch.ExchangeDeclare(
-		dlxName,
-		"direct",
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to declare dlx: %w", err)
-	}
-
-	waitQueueName := queueName + ".wait"
-	waitQueueArgs := amqp.Table{
-		"x-dead-letter-exchange":    "amq.direct",
-		"x-dead-letter-routing-key": queueName,
-		"x-message-ttl":             30000, // 30s(em ms)
-	}
-	_, err = ch.QueueDeclare(
-		waitQueueName,
-		true,
-		false,
-		false,
-		false,
-		waitQueueArgs,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to declare wait queue: %w", err)
-	}
-
-	err = ch.QueueBind(
-		waitQueueName, queueName, dlxName, false, nil,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to bind wait queue: %w", err)
-	}
-
-	mainQueueArgs := amqp.Table{
-		"x-dead-letter-exchange":    dlxName,
-		"x-dead-letter-routing-key": queueName,
-	}
-	_, err = ch.QueueDeclare(
-		queueName, true, false, false, false, mainQueueArgs,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to declare main queue: %w", err)
-	}
-
-	err = ch.QueueBind(queueName, queueName, "amq.direct", false, nil)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func (c *Consumer) ProcessOrder(ctx context.Context, msg []byte) error {
 	var orderDto order.CreateInput
 	if err := json.Unmarshal(msg, &orderDto); err != nil {
@@ -181,4 +123,92 @@ func (c *Consumer) ProcessOrder(ctx context.Context, msg []byte) error {
 		return fmt.Errorf("db update failed: %w", err)
 	}
 	return nil
+}
+
+// Helper Resilience
+
+// setupTopology Main Queue, DLX, Wait Queue e Parking Queue
+func (c *Consumer) setupTopology(ch *amqp.Channel, queueName string) error {
+	mainExchange := "orders_exchange"
+	err := ch.ExchangeDeclare(
+		mainExchange,
+		"direct",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to declare main exchange: %w", err)
+	}
+
+	dlxName := "dlx_exchange"
+	err = ch.ExchangeDeclare(dlxName, "direct", true, false, false, false, nil)
+	if err != nil {
+		return fmt.Errorf("failed to declare dlx: %w", err)
+	}
+
+	waitQueue := queueName + ".wait"
+	argsWait := amqp.Table{
+		"x-dead-letter-exchange":    mainExchange,
+		"x-dead-letter-routing-key": queueName,
+		"x-message-ttl":             30000,
+	}
+	if _, err := ch.QueueDeclare(waitQueue, true, false, false, false, argsWait); err != nil {
+		return fmt.Errorf("failed to declare wait queue: %w", err)
+	}
+	// Bind da Wait Queue na DLX
+	if err := ch.QueueBind(waitQueue, queueName, dlxName, false, nil); err != nil {
+		return fmt.Errorf("failed to bind wait queue: %w", err)
+	}
+
+	// (Main Queue)
+	argsMain := amqp.Table{
+		"x-dead-letter-exchange":    dlxName,
+		"x-dead-letter-routing-key": queueName,
+	}
+	if _, err := ch.QueueDeclare(queueName, true, false, false, false, argsMain); err != nil {
+		return fmt.Errorf("failed to declare main queue: %w", err)
+	}
+
+	if err := ch.QueueBind(queueName, queueName, mainExchange, false, nil); err != nil {
+		return fmt.Errorf("failed to bind main queue: %w", err)
+	}
+
+	parkingQueue := queueName + ".parking"
+	if _, err := ch.QueueDeclare(parkingQueue, true, false, false, false, nil); err != nil {
+		return fmt.Errorf("failed to declare parking queue: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Consumer) getRetryCount(msg amqp.Delivery) int64 {
+	xDeath, ok := msg.Headers["x-death"].([]interface{})
+	if !ok || len(xDeath) == 0 {
+		return 0
+	}
+	if table, ok := xDeath[0].(amqp.Table); ok {
+		if count, ok := table["count"].(int64); ok {
+			return count
+		}
+	}
+	return 0
+}
+
+func (c *Consumer) publishToParking(ch *amqp.Channel, originalQueue string, msg amqp.Delivery) error {
+	parkingQueue := originalQueue + ".parking"
+
+	return ch.Publish(
+		"",
+		parkingQueue,
+		false,
+		false,
+		amqp.Publishing{
+			Headers:     msg.Headers,
+			ContentType: msg.ContentType,
+			Body:        msg.Body,
+		},
+	)
 }
