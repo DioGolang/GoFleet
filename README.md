@@ -1,7 +1,5 @@
 # 🚚 GoFleet
 
-> **Sistema Distribuído de Logística e Despacho em Tempo Real**
-
 ![Go](https://img.shields.io/badge/go-%3E%3D1.22-00ADD8?style=flat-square&logo=go)
 ![Architecture](https://img.shields.io/badge/arch-Microservices-326CE5?style=flat-square)
 ![Architecture](https://img.shields.io/badge/arch-Event--Driven-FF9800?style=flat-square)
@@ -16,61 +14,152 @@
 ![Docker](https://img.shields.io/badge/infra-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/infra-Kubernetes-326CE5?style=flat-square&logo=kubernetes&logoColor=white)
 
+> **Sistema Distribuído de Logística e Despacho Cloud-Native**
 
-O **GoFleet** é um backend de alta performance projetado para demonstrar padrões avançados de engenharia de software, incluindo **Distributed Tracing**, **Metrics Instrumentation** e **State Pattern**. O sistema orquestra a criação de pedidos, processamento assíncrono e geolocalização de motoristas.
-O diferencial deste projeto é a **Observabilidade Completa**: Logs, Métricas e Traces são correlacionados automaticamente através de toda a malha de serviços.
+O **GoFleet** é um backend de alta performance projetado como um laboratório de engenharia de software avançada. Ele simula uma plataforma de despacho de entregas (similar ao Uber/iFood), focando em **sistemas distribuídos**, **observabilidade completa** e **padrões de resiliência**.
+
+O sistema orquestra a criação de pedidos via API REST, processamento assíncrono via filas, comunicação gRPC de baixa latência e busca geoespacial de motoristas.
+
 ---
 
-## 🏗️ Arquitetura
+## 🏗️ Arquitetura e Design
 
-O sistema é um monorepo composto por três microsserviços principais:
+O sistema segue os princípios de **Clean Architecture** e **DDD**, organizado em um monorepo com três microsserviços distintos.
 
-1.  **API Service (`cmd/api`)**: Gateway REST que recebe pedidos.
-2.  **Worker Service (`cmd/worker`)**: Processador assíncrono que consome filas, gerencia regras de negócio e persistência.
-3.  **Fleet Service (`cmd/fleet`)**: Microsserviço gRPC de alta performance para busca geoespacial (Redis).
+### 1. Visão Geral do Sistema (C4 Container Level)
 
-### Fluxo de Observabilidade e Dados
+Este diagrama ilustra como os serviços interagem com a infraestrutura.
+
+```mermaid
+graph TD
+    User[Cliente HTTP] -->|POST /orders| API[🚢 API Service]
+    
+    subgraph Infrastructure
+        DB[(PostgreSQL)]
+        MQ[RabbitMQ]
+        Redis[(Redis Geo)]
+    end
+
+    subgraph Microservices
+        API -->|1. Persiste Pedido| DB
+        API -->|2. Publica Evento| MQ
+        
+        Worker[👷 Worker Service] -->|3. Consome| MQ
+        Worker -->|6. Atualiza Status| DB
+        
+        Fleet[📍 Fleet Service] -->|5. GeoSearch| Redis
+    end
+
+    Worker -->|4. gRPC SearchDriver| Fleet
+
+```
+
+### 2. Fluxo de Dados (Sequence Diagram)
+
+O fluxo "Happy Path" de um pedido, demonstrando a natureza assíncrona e eventual do sistema.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant API
+    participant DB
+    participant RabbitMQ
+    participant Worker
+    participant Fleet
+    participant Redis
+
+    User->>API: POST /api/v1/orders
+    activate API
+    API->>DB: INSERT Order (PENDING)
+    API->>RabbitMQ: Publish (orders.created)
+    API-->>User: 201 Created (Order ID)
+    deactivate API
+
+    Note over RabbitMQ,Worker: Processamento Assíncrono
+
+    RabbitMQ->>Worker: Consume Message
+    activate Worker
+    Worker->>Worker: Extract Tracing Context
+    
+    Worker->>Fleet: gRPC SearchDriver(OrderID)
+    activate Fleet
+    Fleet->>Redis: GEOSEARCH (Radius 5km)
+    Redis-->>Fleet: Driver Found
+    Fleet-->>Worker: Driver Details
+    deactivate Fleet
+
+    Worker->>DB: UPDATE Order (DISPATCHED)
+    Worker-->>RabbitMQ: ACK
+    deactivate Worker
+
+```
+
+---
+
+## 🛡️ Engenharia de Resiliência
+
+Este projeto implementa padrões robustos para lidar com falhas em sistemas distribuídos, localizados principalmente no `cmd/worker`.
+
+### Estratégia de Defesa do Worker
 
 ```mermaid
 graph LR
+    Queue[RabbitMQ] -->|Msg| Retry[🔄 Exponential Backoff]
+    Retry --> Circuit[⚡ Circuit Breaker]
+    Circuit --> Handler[Process Order]
+    Handler -->|gRPC Call| FleetService
 
-subgraph Observability_Pipeline
-    direction TB
+    style Circuit fill:#f9f,stroke:#333,stroke-width:2px
+    style Retry fill:#bbf,stroke:#333,stroke-width:2px
 
-    API -.->|Traces OTLP| Jaeger
-    Worker -.->|Traces OTLP| Jaeger
-    Fleet -.->|Traces OTLP| Jaeger
-
-    API -.->|Metrics Pull| Prometheus
-    Worker -.->|Metrics Pull| Prometheus
-    Fleet -.->|Metrics Pull| Prometheus
-
-    API -.->|Logs JSON| DockerOutput
-    Worker -.->|Logs JSON| DockerOutput
-    Fleet -.->|Logs JSON| DockerOutput
-
-    DockerOutput -.->|Tail| Promtail
-    Promtail -.->|Push| Loki
-end
 ```
-Jaeger --> Grafana
-Prometheus --> Grafana
-Loki --> Grafana
+
+1. **Circuit Breaker (Gobreaker):**
+* Protege o `Fleet Service` de ser sobrecarregado caso comece a falhar.
+* Configuração: Abre o circuito após falha de 60% das requisições (min 10 requests).
+
+
+2. **Exponential Backoff:**
+* Se o processamento falhar (ex: erro transiente de rede), o sistema tenta novamente 3 vezes, aumentando o tempo de espera exponencialmente (1s, 2s, 4s).
+
+
+3. **Dead Letter Queues (DLQ):**
+* Mensagens que excedem as tentativas são enviadas para uma fila de "Wait" ou "Parking" para análise manual, garantindo que nenhum pedido seja perdido.
+
+
+4. **Graceful Shutdown:**
+* Todos os serviços interceptam sinais de `SIGTERM` para fechar conexões com DB e RabbitMQ e terminar requisições em andamento antes de encerrar.
+
+
 
 ---
 
-## 🛠️ Stack Tecnológico
+## 👁️ Observabilidade Completa
 
-* **Linguagem**: Go 1.25
-* **Web Framework**: Chi Router v5 (Leve e idiomático)
-* **RPC**: gRPC + Protobuf (Comunicação interna otimizada)
-* **Database**: PostgreSQL 18 (SQLC para queries Type-Safe)
-* **Cache/Geo**: Redis + Go-Redis (GeoSpatial Indexing)
-* **Observabilidade**:
-* **Tracing**: OpenTelemetry (OTel) com Jaeger.
-* **Logs**: (JSON estruturado) -> Promtail -> Loki
-* **Grafana**: Visualização unificada.
-* **Metrics**: Prometheus (Custom Registry & Decorators).
+O diferencial do GoFleet é a correlação total de dados. Um `TraceID` gerado na API viaja via headers AMQP até o Worker e via metadados gRPC até o Fleet.
+
+### Stack de Observabilidade
+
+* **Tracing:** OpenTelemetry (OTel) -> Jaeger.
+* **Métricas:** Prometheus (exposto em `:2112/metrics`).
+* **Logs:** Zap (JSON Estruturado) com injeção automática de `trace_id` e `span_id` -> Promtail -> Loki.
+* **Visualização:** Grafana unificando tudo.
+
+---
+
+## 🛠️ Tecnologias e Bibliotecas
+
+| Categoria | Tecnologia | Uso no Projeto |
+| --- | --- | --- |
+| **Linguagem** | **Go 1.25** | Core do sistema |
+| **Framework HTTP** | **Chi v5** | Router leve e idiomático |
+| **Comunicação** | **gRPC + Protobuf** | Comunicação interna (Worker -> Fleet) |
+| **Mensageria** | **RabbitMQ** | Desacoplamento de eventos |
+| **Database** | **PostgreSQL + SQLC** | Persistência Type-Safe (Sem ORM) |
+| **Cache/Geo** | **Redis** | GeoSpatial Indexing para motoristas |
+| **Resiliência** | **Sony Gobreaker** | Circuit Breaker |
+| **Config** | **Viper** | Gerenciamento de váriaveis de ambiente |
+| **Tracing** | **OpenTelemetry** | Instrumentação manual e automática |
 
 ---
 
@@ -78,153 +167,119 @@ Loki --> Grafana
 
 ### Pré-requisitos
 
-* Docker & Docker Compose
-* Go 1.25+ (para desenvolvimento local)
-* Make
+* Docker e Docker Compose
+* Make (opcional, para usar os atalhos)
+* Go 1.25+ (apenas se for rodar fora do Docker)
 
-### Quick Start
+### Passo a Passo
 
-1. **Suba o ambiente completo:**
+1. **Subir o ecossistema:**
+   O comando abaixo compila os binários, constrói as imagens Docker e sobe toda a infraestrutura (Bancos, Filas e Observabilidade).
 ```bash
 make docker-up
 
 ```
 
-*Isso iniciará API, Worker, Fleet, DB, RabbitMQ, Redis, Jaeger, Prometheus e Grafana.*
-2. **Acesse as interfaces:**
-* **Grafana**: [http://localhost:3000](https://www.google.com/search?q=http://localhost:3000) (Login: `admin` / `admin`)
-* **Jaeger UI**: [http://localhost:16686](https://www.google.com/search?q=http://localhost:16686)
-* **Prometheus**: [http://localhost:9090](https://www.google.com/search?q=http://localhost:9090)
-* **RabbitMQ Mgmt**: [http://localhost:15672](https://www.google.com/search?q=http://localhost:15672) (guest/guest)
+
+2. **Acessar os Dashboards:**
+* **Grafana:** [http://localhost:3000](https://www.google.com/search?q=http://localhost:3000) (User: `admin`, Pass: `admin`)
+* **Jaeger UI:** [http://localhost:16686](https://www.google.com/search?q=http://localhost:16686)
+* **Prometheus:** [http://localhost:9090](https://www.google.com/search?q=http://localhost:9090)
+* **RabbitMQ:** [http://localhost:15672](https://www.google.com/search?q=http://localhost:15672) (guest/guest)
 
 
-3. 🔌 API Endpoints & Teste
-
-### Criar Pedido
-
+3. **Realizar um Teste (Criar Pedido):**
+   Utilize o arquivo `orders.http` ou via cURL:
 ```bash
 curl -X POST http://localhost:8000/api/v1/orders \
 -H "Content-Type: application/json" \
--d '{"id":"pedido-01", "price": 100.0, "tax": 10.0}'
+-d '{"id":"pedido-teste-01", "price": 100.0, "tax": 10.0}'
 
 ```
 
-**O que acontece nos bastidores:**
 
-1. API salva como `PENDING`.
-2. RabbitMQ recebe evento.
-3. Worker processa e busca motorista via gRPC.
-4. Worker atualiza pedido para `DISPATCHED`.
-
----
-
-### Verificar Resultado (Banco de Dados)
-
+4. **Verificar o Fluxo:**
+* Verifique se o pedido foi criado no Postgres:
 ```bash
-docker exec -it gofleet_db psql -U root -d gofleet -c "SELECT * FROM orders WHERE id = 'pedido-demo-01';"
+docker exec -it gofleet_db psql -U root -d gofleet -c "SELECT * FROM orders;"
 
 ```
 
-## 👁️ Observabilidade (Tracing)
 
-O sistema implementa **Distributed Tracing** com OpenTelemetry.
-Para visualizar o caminho da requisição entre os microsserviços:
-
-1. Acesse o **Jaeger UI**: [http://localhost:16686](https://www.google.com/search?q=http://localhost:16686)
-2. Em "Service", selecione `gofleet-api`.
-3. Clique em **Find Traces**.
-4. Você verá o gráfico completo: `API -> RabbitMQ -> Worker -> gRPC -> Redis`.
+* Vá ao **Jaeger**, selecione `gofleet-api` e procure pelos traces. Você verá a linha do tempo completa: API -> RabbitMQ -> Worker -> gRPC -> Redis.
 
 
-## 🧠 Decisões de Design (Staff Engineer View)
-
-### 1. Decorator Pattern para Observabilidade
-
-Em vez de poluir os Use Cases com códigos de métricas, utilizamos o padrão **Decorator**.
-
-* **Arquivo**: `internal/application/usecase/order/create_metrics.go`
-* **Benefício**: O `CreateUseCase` foca puramente em regras de negócio. O `CreateOrderMetricsDecorator` envolve a execução e registra a latência e contagem no Prometheus, mantendo o princípio de responsabilidade única (SRP).
-
-### 2. State Pattern no Domínio
-
-O ciclo de vida do pedido (`PENDING` -> `DISPATCHED`) é gerenciado através do padrão **State**.
-
-* **Arquivo**: `internal/domain/entity/states.go`
-* **Benefício**: Elimina condicionais complexas (`if status == "PENDING"`) e garante que transições inválidas retornem erro (ex: tentar cancelar um pedido já entregue).
-
-### 3. Propagação de Contexto (Distributed Tracing)
-
-Implementamos a propagação de contexto manual no RabbitMQ.
-
-* **Arquivo**: `internal/infra/event/consumer.go`
-* **Benefício**: O TraceID gerado na API HTTP viaja nos headers da mensagem AMQP e é extraído pelo Worker. Isso permite visualizar no Jaeger a jornada completa da requisição, mesmo passando por filas assíncronas.
-
-### 4. Interface Segregation nas Métricas
-
-Definimos uma interface explícita para métricas.
-
-* **Arquivo**: `pkg/metrics/metrics.go`
-* **Benefício**: Permite trocar o provedor de métricas (ex: de Prometheus para Datadog) sem alterar uma linha de código nos Use Cases, apenas trocando a implementação injetada no `main.go`.
-
-### 4. Correlação de Logs e Traces
-
-Implementamos um Logger Wrapper (pkg/logger) usando Uber Zap.
-
-* **Decisão**: Todos os logs são estruturados em JSON.
-* **Mágica**: O logger verifica automaticamente se existe um context.Context com um Span ativo. Se houver, ele injeta trace_id e span_id no log.
-* **Resultado**: No Grafana, você pode visualizar um Trace e clicar para ver "Logs for this Trace", unindo infraestrutura e aplicação.
 
 ---
 
-## 🧠 Decisões Arquiteturais
+## 🧠 Padrões de Código (Staff Engineer View)
 
-1. **Redis para Geolocalização:** Utilizamos `GEOSEARCH` do Redis em vez de calcular distâncias no PostgreSQL (PostGIS) ou em memória no Go. Isso garante latência de sub-milissegundos na busca de motoristas e torna o serviço de frota *stateless*.
-2. **Worker Pattern:** A criação do pedido é desacoplada da busca por motoristas. Se o serviço de mapas cair, o pedido é salvo e processado depois (Resiliência).
-3. **SQLC:** Optamos por não usar ORM (GORM) para ter controle total das queries e performance máxima no acesso ao PostgreSQL.
-4. **gRPC:** Comunicação binária entre Worker e Fleet Service para economizar banda e tempo de CPU em alto tráfego.
+Explicação de decisões técnicas encontradas no código fonte:
+
+### 1. Decorator Pattern para Métricas
+
+Local: `internal/application/usecase/order/create_metrics.go`
+
+* **Por quê?** Separa a lógica de negócio (Use Case) da instrumentação.
+* **Como?** O `CreateOrderMetricsDecorator` "envolve" o Use Case real. Ele mede o tempo de execução e incrementa contadores no Prometheus sem sujar a regra de negócio.
+
+### 2. State Pattern
+
+Local: `internal/domain/entity/states.go`
+
+* **Por quê?** Evita condicionais complexas (`if status == "PENDING"`) e garante transições seguras.
+* **Como?** Cada estado (Pending, Dispatched, Delivered) é uma struct que implementa a interface `OrderState`. Tentar entregar um pedido cancelado retorna erro automaticamente.
+
+### 3. Interface Segregation (Ports & Adapters)
+
+Local: `internal/application/port`
+
+* **Por quê?** O domínio não conhece o banco de dados ou gRPC.
+* **Como?** Os Use Cases dependem de interfaces (`OrderRepository`, `LocationRepository`). As implementações concretas (Postgres, Redis) estão na camada de `infra`.
+
+### 4. Propagação de Contexto (Distributed Tracing)
+
+Local: `internal/infra/event/consumer.go`
+
+* **Por quê?** Não perder o rastro da requisição quando ela entra na fila.
+* **Como?** Extraímos o `traceparent` dos headers da mensagem AMQP e injetamos no `context.Context` do Go. Isso liga o Span do `produtor` (API) ao Span do `consumidor` (Worker).
+
+---
 
 ## 📂 Estrutura de Pastas
 
 ```text
 .
-├── cmd/                # Entrypoints (api, fleet, worker)
-├── configs/            # Configuração via Viper
+├── cmd/                # Entrypoints (main.go)
+│   ├── api/            # API REST
+│   ├── fleet/          # Serviço gRPC de Geolocalização
+│   └── worker/         # Processador de Filas
+├── configs/            # Configuração (Viper)
 ├── internal/
-│   ├── application/    # Regras de Aplicação
-│   │   ├── usecase/    # Lógica de Negócio + Decorators
+│   ├── application/    # Camada de Aplicação
+│   │   ├── usecase/    # Regras de Negócio + Decorators
 │   │   └── port/       # Interfaces (Ports)
-│   ├── domain/         # Core Domain (Entities, Events, States)
-│   └── infra/          # Implementações (Adapters)
-│       ├── database/   # Repositórios e SQLC
-│       ├── event/      # RabbitMQ Consumer/Dispatcher
-│       ├── grpc/       # Protobuf e Service Implementation
-│       └── web/        # HTTP Handlers e Middlewares
-├── pkg/                # Libs Compartilhadas (Metrics, OTel, Utils)
-└── sql/                # Migrations e Queries
+│   ├── domain/         # Core (Entidades, Eventos, States)
+│   └── infra/          # Adaptadores de Infraestrutura
+│       ├── database/   # Implementações SQLC e Redis
+│       ├── event/      # RabbitMQ (Producer/Consumer)
+│       ├── grpc/       # Implementação do Server/Client gRPC
+│       └── web/        # Handlers HTTP
+├── pkg/                # Packages compartilhados (Logger, Metrics, OTel)
+└── sql/                # Migrations e Queries SQLC
 
 ```
 
 ---
 
-## 📊 Métricas Chave (Prometheus)
+## 🧪 Comandos Úteis (Makefile)
 
-O sistema expõe métricas customizadas na porta `:2112` para evitar ruído na porta principal da aplicação.
-
-* `app_usecase_total`: Contador de execuções por Use Case e Status.
-* `app_usecase_duration_seconds`: Histograma de latência (P95, P99).
-* `http_request_duration_seconds`: Latência dos endpoints REST.
-* `grpc_request_duration_seconds`: Latência das chamadas internas gRPC.
-* `goofleet_order_created_total`: Métrica de negócio (Contador de Pedidos).
+* `make proto`: Gera o código Go a partir dos arquivos `.proto`.
+* `make sqlc`: Gera o código Go a partir das queries SQL.
+* `make new-migration name=create_orders`: Cria novo arquivo de migration.
+* `make test`: Roda testes unitários.
+* `make run-api`: Roda a API localmente (requer DB/Rabbit rodando).
 
 ---
 
-## 🧪 Testes
-
-Execute a suíte de testes unitários:
-
-```bash
-make test
-
-```
-
-Os testes de entidade garantem a integridade das regras de negócio (ex: validação de preço negativo ou ID vazio).
+**Autoria:** Desenvolvido como referência para arquiteturas Go Modernas.
