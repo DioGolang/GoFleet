@@ -5,6 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"github.com/DioGolang/GoFleet/configs"
 	"github.com/DioGolang/GoFleet/internal/application/usecase/order"
 	"github.com/DioGolang/GoFleet/internal/domain/event"
@@ -22,12 +29,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/riandyrn/otelchi"
-	"log"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 func main() {
@@ -111,27 +112,11 @@ func main() {
 		}
 	}(ch)
 
-	_, err = ch.QueueDeclare(
-		"orders.created", // name
-		true,             // durable
-		false,            // delete when unused
-		false,            // exclusive
-		false,            // no-wait
-		nil,              // arguments
+	err = ch.ExchangeDeclare(
+		"orders_exchange", "direct", true, false, false, false, nil,
 	)
 	if err != nil {
-		panic(err)
-	}
-
-	err = ch.QueueBind(
-		"orders.created",
-		"orders.created",
-		"amq.direct",
-		false,
-		nil,
-	)
-	if err != nil {
-		panic(err)
+		fail("failed to declare exchange", err)
 	}
 
 	// DEPENDENCIES & HANDLERS
