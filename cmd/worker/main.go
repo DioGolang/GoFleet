@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/DioGolang/GoFleet/internal/application/usecase/order"
 	"github.com/DioGolang/GoFleet/pkg/logger"
 	"github.com/DioGolang/GoFleet/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
@@ -101,7 +102,7 @@ func main() {
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			// Open the circuit if there are more than 10 requests AND 60% failure
 			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return counts.Requests >= 10 && failureRatio >= 6.0
+			return counts.Requests >= 10 && failureRatio >= 0.6
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
 			zapLogger.Warn(context.Background(), "Circuit Breaker State Changed",
@@ -128,8 +129,14 @@ func main() {
 		}
 	}(conn)
 
+	dispatchUseCase := order.NewDispatchUseCase(repository)
+	dispatchUseCaseWithMetrics := &order.DispatchOrderMetricsDecorator{
+		Next:    dispatchUseCase,
+		Metrics: promMetrics,
+	}
+
 	// Consumer Logic
-	consumer := event.NewConsumer(conn, grpcClient, repository, zapLogger)
+	consumer := event.NewConsumer(conn, grpcClient, repository, dispatchUseCaseWithMetrics, zapLogger)
 
 	handlerStack := consumer.ProcessOrder
 
