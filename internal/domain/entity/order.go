@@ -59,6 +59,21 @@ func (o *Order) CalculateFinalPrice() error {
 	return nil
 }
 
+func Restore(id string, price, tax, finalPrice float64, statusStr string, driverID string) (*Order, error) {
+	state, err := ParseState(statusStr)
+	if err != nil {
+		return nil, err
+	}
+	return &Order{
+		id:         id,
+		price:      price,
+		tax:        tax,
+		finalPrice: finalPrice,
+		state:      state,
+		driverID:   driverID,
+	}, nil
+}
+
 func (o *Order) TransitionTo(newState OrderState) {
 	o.state = newState
 }
