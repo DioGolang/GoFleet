@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
+
 	"github.com/DioGolang/GoFleet/internal/domain/entity"
 )
 
@@ -42,4 +44,29 @@ func (r *OrderRepositoryImpl) UpdateStatus(ctx context.Context, id string, statu
 		DriverID: sql.NullString{String: driverID, Valid: driverID != ""},
 		ID:       id,
 	})
+}
+
+func (r *OrderRepositoryImpl) FindByID(ctx context.Context, id string) (*entity.Order, error) {
+	model, err := r.GetOrder(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	price, _ := strconv.ParseFloat(model.Price, 64)
+	tax, _ := strconv.ParseFloat(model.Tax, 64)
+	finalPrice, _ := strconv.ParseFloat(model.FinalPrice, 64)
+
+	driverID := ""
+	if model.DriverID.Valid {
+		driverID = model.DriverID.String
+	}
+
+	return entity.Restore(
+		model.ID,
+		price,
+		tax,
+		finalPrice,
+		model.Status,
+		driverID,
+	)
 }
