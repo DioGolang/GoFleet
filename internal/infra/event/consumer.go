@@ -23,6 +23,7 @@ type Consumer struct {
 	Conn            *amqp.Connection
 	GrpcClient      pb.FleetServiceClient
 	OrderRepository outbound.OrderRepository
+	DispatchUseCase order.DispatchUseCase
 	Logger          logger.Logger
 }
 
@@ -30,12 +31,14 @@ func NewConsumer(
 	conn *amqp.Connection,
 	grpcClient pb.FleetServiceClient,
 	repo outbound.OrderRepository,
+	dispatchUseCase order.DispatchUseCase,
 	l logger.Logger,
 ) *Consumer {
 	return &Consumer{
 		Conn:            conn,
 		GrpcClient:      grpcClient,
 		OrderRepository: repo,
+		DispatchUseCase: dispatchUseCase,
 		Logger:          l,
 	}
 }
@@ -117,10 +120,10 @@ func (c *Consumer) ProcessOrder(ctx context.Context, msg []byte) error {
 		return fmt.Errorf("grpc search driver failed: %w", err)
 	}
 
-	err = c.OrderRepository.UpdateStatus(ctx, orderDto.ID, "DISPATCHED", res.DriverId)
-	if err != nil {
-		c.Logger.Error(ctx, "db update failed", logger.WithError(err))
-		return fmt.Errorf("db update failed: %w", err)
+	input := order.DispatchInput{OrderID: orderDto.ID, DriverID: res.DriverId}
+	if err := c.DispatchUseCase.Execute(ctx, input); err != nil {
+		c.Logger.Error(ctx, "use case execution failed", logger.WithError(err))
+		return err
 	}
 	return nil
 }
