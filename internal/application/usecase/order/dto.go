@@ -8,9 +8,14 @@ type CreateInput struct {
 	Tax   float64 `json:"tax"`
 }
 
+type DispatchInput struct {
+	OrderID  string
+	DriverID string
+}
+
 // Output
 
 type CreateOutput struct {
 	ID         string  `json:"id"`
-	FinalPrice float64 `json:"final-price"`
+	FinalPrice float64 `json:"final_price"`
 }
