@@ -9,5 +9,5 @@ import (
 type OrderRepository interface {
 	Save(order *entity.Order) error
 	UpdateStatus(ctx context.Context, id string, status string, driverID string) error
-	FindById(ctx context.Context, id string) (*entity.Order, error)
+	FindByID(ctx context.Context, id string) (*entity.Order, error)
 }
