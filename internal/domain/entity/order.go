@@ -43,9 +43,6 @@ func (o *Order) Validate() error {
 		return ErrIDIsRequired
 	}
 	if o.price <= 0 {
-		return ErrPriceIsRequired
-	}
-	if o.price <= 0 {
 		return ErrPriceMustBePos
 	}
 	if o.tax < 0 {
