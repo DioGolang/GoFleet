@@ -52,9 +52,20 @@ func (r *OrderRepositoryImpl) FindByID(ctx context.Context, id string) (*entity.
 		return nil, err
 	}
 
-	price, _ := strconv.ParseFloat(model.Price, 64)
-	tax, _ := strconv.ParseFloat(model.Tax, 64)
-	finalPrice, _ := strconv.ParseFloat(model.FinalPrice, 64)
+	price, err := strconv.ParseFloat(model.Price, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse price for order %s: %w", id, err)
+	}
+
+	tax, err := strconv.ParseFloat(model.Tax, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse tax for order %s: %w", id, err)
+	}
+
+	finalPrice, err := strconv.ParseFloat(model.FinalPrice, 64)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse final_price for order %s: %w", id, err)
+	}
 
 	driverID := ""
 	if model.DriverID.Valid {
