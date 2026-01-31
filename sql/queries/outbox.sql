@@ -34,4 +34,5 @@ WHERE id = $1;
 -- name: DeleteOldOutboxEvents :exec
 DELETE FROM outbox
 WHERE status IN ('PUBLISHED', 'FAILED')
-AND created_at < NOW() - CAST($1 AS INTERVAL);
+  -- O cast ::text força o SQLC a gerar o argumento como string no Go
+  AND created_at < NOW() - (sqlc.arg(interval)::text)::interval;
