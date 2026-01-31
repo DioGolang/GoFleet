@@ -15,6 +15,7 @@ type Event interface {
 type EventDispatcher interface {
 	Register(eventName string, handler EventHandler) error
 	Dispatch(ctx context.Context, event Event) error
+	DispatchRaw(ctx context.Context, routingKey string, payload []byte) error
 	Remove(eventName string, handler EventHandler) error
 	Has(eventName string, handler EventHandler) bool
 	Clear()
