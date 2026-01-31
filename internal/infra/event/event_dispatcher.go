@@ -66,6 +66,38 @@ func (ed *Dispatcher) Dispatch(ctx context.Context, event events.Event) error {
 	return nil
 }
 
+func (ed *Dispatcher) DispatchRaw(ctx context.Context, routingKey string, payload []byte) error {
+	headers := make(amqp.Table)
+	otel.GetTextMapPropagator().Inject(ctx, carrier.AMQPHeadersCarrier(headers))
+
+	ed.Logger.Debug(ctx, "Relaying event from outbox",
+		logger.String("routing_key", routingKey),
+	)
+
+	err := ed.RabbitMQChannel.PublishWithContext(
+		ctx,
+		"orders_exchange",
+		routingKey,
+		false,
+		false,
+		amqp.Publishing{
+			Headers:     headers,
+			ContentType: "application/json",
+			Timestamp:   time.Now(),
+			Body:        payload,
+		})
+
+	if err != nil {
+		ed.Logger.Error(ctx, "Failed to relay message to RabbitMQ",
+			logger.String("routing_key", routingKey),
+			logger.WithError(err),
+		)
+		return err
+	}
+
+	return nil
+}
+
 func (ed *Dispatcher) Register(eventName string, handler events.EventHandler) error { return nil }
 func (ed *Dispatcher) Remove(eventName string, handler events.EventHandler) error   { return nil }
 func (ed *Dispatcher) Has(eventName string, handler events.EventHandler) bool       { return false }
