@@ -51,7 +51,7 @@ func (uc *CreateUseCaseImpl) Execute(ctx context.Context, input CreateInput) (Cr
 			return err
 		}
 
-		payloadBytes, err := json.Marshal(order)
+		payloadBytes, err := json.Marshal(output)
 		if err != nil {
 			return fmt.Errorf("failed to marshal order for outbox: %w", err)
 		}
