@@ -2,30 +2,30 @@ package order
 
 import (
 	"context"
+	"encoding/json"
+
 	"github.com/DioGolang/GoFleet/internal/application/port/outbound"
 	"github.com/DioGolang/GoFleet/internal/domain/entity"
 	"github.com/DioGolang/GoFleet/pkg/events"
 	"github.com/DioGolang/GoFleet/pkg/logger"
+	"github.com/google/uuid"
 )
 
 type CreateUseCaseImpl struct {
-	OrderRepository outbound.OrderRepository
-	OrderCreated    events.Event
-	EventDispatcher events.EventDispatcher
-	Logger          logger.Logger
+	UoW          outbound.UnitOfWork
+	OrderCreated events.Event
+	Logger       logger.Logger
 }
 
 func NewCreateOrderUseCase(
-	orderRepository outbound.OrderRepository,
+	uow outbound.UnitOfWork,
 	created events.Event,
-	dispatcher events.EventDispatcher,
 	log logger.Logger,
 ) *CreateUseCaseImpl {
 	return &CreateUseCaseImpl{
-		OrderRepository: orderRepository,
-		OrderCreated:    created,
-		EventDispatcher: dispatcher,
-		Logger:          log,
+		UoW:          uow,
+		OrderCreated: created,
+		Logger:       log,
 	}
 }
 
@@ -37,21 +37,39 @@ func (uc *CreateUseCaseImpl) Execute(ctx context.Context, input CreateInput) (Cr
 		return CreateOutput{}, err
 	}
 
-	err = uc.OrderRepository.Save(order)
-	if err != nil {
-		uc.Logger.Error(ctx, "failed to save", logger.WithError(err))
-		return CreateOutput{}, err
-	}
-
 	output := CreateOutput{
 		ID:         order.ID(),
 		FinalPrice: order.FinalPrice(),
 	}
 	uc.OrderCreated.SetPayload(output)
-	err = uc.EventDispatcher.Dispatch(ctx, uc.OrderCreated)
+	payloadBytes, err := json.Marshal(output)
 	if err != nil {
+		uc.Logger.Error(ctx, "failed to marshal event payload", logger.WithError(err))
 		return CreateOutput{}, err
 	}
-	uc.Logger.Info(ctx, "Order created successfully")
+
+	err = uc.UoW.Do(ctx, func(provider outbound.RepositoryProvider) error {
+		repo := provider.Order()
+
+		if err := repo.Save(order); err != nil {
+			return err
+		}
+
+		err = repo.SaveOutboxEvent(
+			ctx,
+			uuid.New().String(),
+			order.ID(),
+			uc.OrderCreated.GetName(),
+			payloadBytes,
+			"orders.created",
+		)
+		return err
+	})
+	if err != nil {
+		uc.Logger.Error(ctx, "failed to execute transactional creation", logger.WithError(err))
+		return CreateOutput{}, err
+	}
+	uc.Logger.Info(ctx, "Order created successfully (Atomic Transaction)")
 	return output, nil
+
 }
