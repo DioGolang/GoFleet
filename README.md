@@ -70,10 +70,14 @@ sequenceDiagram
 
     User->>API: POST /api/v1/orders
     activate API
-    API->>DB: INSERT Order (PENDING)
-    API->>RabbitMQ: Publish (orders.created)
+    API->>DB: Transaction: INSERT Order (PENDING) + INSERT Outbox
     API-->>User: 201 Created (Order ID)
     deactivate API
+
+    Note over API,RabbitMQ: Outbox Relay (Background Process)
+    API->>DB: Fetch Pending Events
+    API->>RabbitMQ: Publish (orders.created)
+    API->>DB: Mark as Published
 
     Note over RabbitMQ,Worker: Processamento Assíncrono
 
@@ -149,17 +153,17 @@ O diferencial do GoFleet é a correlação total de dados. Um `TraceID` gerado n
 
 ## 🛠️ Tecnologias e Bibliotecas
 
-| Categoria | Tecnologia | Uso no Projeto |
-| --- | --- | --- |
-| **Linguagem** | **Go 1.25** | Core do sistema |
-| **Framework HTTP** | **Chi v5** | Router leve e idiomático |
-| **Comunicação** | **gRPC + Protobuf** | Comunicação interna (Worker -> Fleet) |
-| **Mensageria** | **RabbitMQ** | Desacoplamento de eventos |
-| **Database** | **PostgreSQL + SQLC** | Persistência Type-Safe (Sem ORM) |
-| **Cache/Geo** | **Redis** | GeoSpatial Indexing para motoristas |
-| **Resiliência** | **Sony Gobreaker** | Circuit Breaker |
-| **Config** | **Viper** | Gerenciamento de váriaveis de ambiente |
-| **Tracing** | **OpenTelemetry** | Instrumentação manual e automática |
+| Categoria          | Tecnologia            | Uso no Projeto                         |
+|--------------------|-----------------------|----------------------------------------|
+| **Linguagem**      | **Go 1.25**           | Core do sistema                        |
+| **Framework HTTP** | **Chi v5**            | Router leve e idiomático               |
+| **Comunicação**    | **gRPC + Protobuf**   | Comunicação interna (Worker -> Fleet)  |
+| **Mensageria**     | **RabbitMQ**          | Desacoplamento de eventos              |
+| **Database**       | **PostgreSQL + SQLC** | Persistência Type-Safe (Sem ORM)       |
+| **Cache/Geo**      | **Redis**             | GeoSpatial Indexing para motoristas    |
+| **Resiliência**    | **Sony Gobreaker**    | Circuit Breaker                        |
+| **Config**         | **Viper**             | Gerenciamento de váriaveis de ambiente |
+| **Tracing**        | **OpenTelemetry**     | Instrumentação manual e automática     |
 
 ---
 
