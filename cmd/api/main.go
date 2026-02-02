@@ -119,11 +119,30 @@ func main() {
 		fail("failed to declare exchange", err)
 	}
 
-	// DEPENDENCIES & HANDLERS
-	orderRepository := database.NewOrderRepository(db)
-	orderCreated := event.NewOrderCreated()
+	// =========================================================================
+	// DEPENDENCIES: OUTBOX & UNIT OF WORK
+	// =========================================================================
+
+	uow := database.NewUnitOfWork(db)
 	eventDispatcher := infraEvent.NewDispatcher(ch, zapLogger)
-	createOrderUseCase := order.NewCreateOrderUseCase(orderRepository, orderCreated, eventDispatcher, zapLogger)
+	queries := database.New(db)
+	relay := infraEvent.NewOutboxRelay(queries, db, eventDispatcher, zapLogger)
+
+	go func() {
+		zapLogger.Info(ctx, "Starting Outbox Relay...")
+		relay.Run(ctx)
+	}()
+
+	go func() {
+		relay.RunCleaner(ctx)
+	}()
+
+	// =========================================================================
+	// DEPENDENCIES & HANDLERS
+	// =========================================================================
+	orderCreated := event.NewOrderCreated()
+	createOrderUseCase := order.NewCreateOrderUseCase(uow, orderCreated, zapLogger)
+
 	createOrderUseCaseWithMetrics := &order.CreateOrderMetricsDecorator{
 		Next:    createOrderUseCase,
 		Metrics: prometheusMetrics,
