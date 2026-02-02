@@ -3,6 +3,7 @@ package order
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/DioGolang/GoFleet/internal/application/port/outbound"
 	"github.com/DioGolang/GoFleet/internal/domain/entity"
@@ -42,17 +43,17 @@ func (uc *CreateUseCaseImpl) Execute(ctx context.Context, input CreateInput) (Cr
 		FinalPrice: order.FinalPrice(),
 	}
 	uc.OrderCreated.SetPayload(output)
-	payloadBytes, err := json.Marshal(output)
-	if err != nil {
-		uc.Logger.Error(ctx, "failed to marshal event payload", logger.WithError(err))
-		return CreateOutput{}, err
-	}
 
 	err = uc.UoW.Do(ctx, func(provider outbound.RepositoryProvider) error {
 		repo := provider.Order()
 
 		if err := repo.Save(order); err != nil {
 			return err
+		}
+
+		payloadBytes, err := json.Marshal(order)
+		if err != nil {
+			return fmt.Errorf("failed to marshal order for outbox: %w", err)
 		}
 
 		err = repo.SaveOutboxEvent(
@@ -70,6 +71,6 @@ func (uc *CreateUseCaseImpl) Execute(ctx context.Context, input CreateInput) (Cr
 		return CreateOutput{}, err
 	}
 	uc.Logger.Info(ctx, "Order created successfully (Atomic Transaction)")
-	return output, nil
+	return CreateOutput{ID: order.ID(), FinalPrice: order.FinalPrice()}, nil
 
 }
