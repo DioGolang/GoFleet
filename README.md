@@ -100,6 +100,68 @@ sequenceDiagram
 
 ---
 
+## 🧩 Modelagem e Dados
+
+### Diagrama de Máquina de Estados (Lifecycle do Pedido)
+
+Para evitar estados inválidos e garantir a segurança das transições (ex: um pedido cancelado não pode ser entregue), utilizamos o **State Pattern**. O diagrama abaixo ilustra a máquina de estados finita implementada no domínio:
+
+```mermaid
+
+stateDiagram-v2
+    direction LR
+    [*] --> PENDING
+    
+    state PENDING {
+        [*] --> AguardandoProcessamento
+    }
+
+    PENDING --> DISPATCHED : Dispatch(driver_id)
+    PENDING --> CANCELLED : Cancel()
+    
+    state DISPATCHED {
+       [*] --> MotoristaAlocado
+    }
+
+    DISPATCHED --> DELIVERED : Deliver()
+    DISPATCHED --> CANCELLED : Cancel()
+
+    DELIVERED --> [*]
+    CANCELLED --> [*]
+
+```
+
+### Diagrama Entidade-Relacionamento (ER)
+
+Para resolver o problema de escrita dual (Dual Write) em sistemas distribuídos, não publicamos mensagens diretamente na fila. Em vez disso, persistimos o evento na mesma transação do banco de dados, garantindo atomicidade.
+
+```mermaid
+
+erDiagram
+    ORDERS ||--o{ OUTBOX : "Atomic Write"
+    
+    ORDERS {
+        varchar id PK
+        decimal price
+        decimal tax
+        decimal final_price
+        varchar status
+        varchar driver_id
+    }
+
+    OUTBOX {
+        uuid id PK
+        varchar aggregate_id FK "Refers to Order.ID"
+        varchar aggregate_type
+        varchar event_type
+        jsonb payload
+        varchar status "PENDING | PUBLISHED"
+    }
+
+```
+
+---
+
 ## 🛡️ Engenharia de Resiliência
 
 Este projeto implementa padrões robustos para lidar com falhas em sistemas distribuídos, localizados principalmente no `cmd/worker`.
