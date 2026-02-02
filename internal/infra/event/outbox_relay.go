@@ -6,18 +6,19 @@ import (
 	"time"
 
 	"github.com/DioGolang/GoFleet/internal/infra/database"
+	"github.com/DioGolang/GoFleet/pkg/events"
 	"github.com/DioGolang/GoFleet/pkg/logger"
 )
 
 type OutboxRelay struct {
 	db         *database.Queries
 	dbConn     *sql.DB
-	dispatcher Dispatcher
+	dispatcher events.EventDispatcher
 	logger     logger.Logger
 	batchSize  int32
 }
 
-func NewOutboxRelay(db *database.Queries, conn *sql.DB, disp Dispatcher, log logger.Logger) *OutboxRelay {
+func NewOutboxRelay(db *database.Queries, conn *sql.DB, disp events.EventDispatcher, log logger.Logger) *OutboxRelay {
 	return &OutboxRelay{
 		db:         db,
 		dbConn:     conn,
