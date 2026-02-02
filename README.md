@@ -338,6 +338,27 @@ Local: `internal/infra/event/consumer.go`
 
 ---
 
+---
+
+## 🔧 Configuração (Environment Variables)
+
+O sistema segue a metodologia **12-Factor App**, externalizando configurações via variáveis de ambiente. Abaixo estão as principais chaves definidas em `configs/configs.go`:
+
+| Variável                      | Descrição                 | Valor Padrão (Dev) |
+|-------------------------------|---------------------------|--------------------|
+| `DB_HOST`                     | Host do PostgreSQL        | `localhost`        |
+| `DB_PORT`                     | Porta do Banco            | `5432`             |
+| `RABBITMQ_HOST`               | Host do RabbitMQ          | `localhost`        |
+| `REDIS_HOST`                  | Host do Redis             | `localhost`        |
+| `OTEL_SERVICE_NAME`           | Nome do serviço no Jaeger | `gofleet-api`      |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Endpoint do Collector     | `localhost:4317`   |
+| `WEB_SERVER_PORT`             | Porta da API REST         | `8000`             |
+| `GRPC_PORT`                   | Porta do Servidor gRPC    | `50051`            |
+
+> **Nota:** Para execução local, o arquivo `.env` é carregado automaticamente pelo Viper.
+
+---
+
 ## 🧪 Comandos Úteis (Makefile)
 
 * `make proto`: Gera o código Go a partir dos arquivos `.proto`.
@@ -345,6 +366,18 @@ Local: `internal/infra/event/consumer.go`
 * `make new-migration name=create_orders`: Cria novo arquivo de migration.
 * `make test`: Roda testes unitários.
 * `make run-api`: Roda a API localmente (requer DB/Rabbit rodando).
+
+---
+
+## 🔮 Roadmap e Melhorias Futuras
+
+Este projeto é um laboratório vivo. Os próximos passos para atingir o nível "Production Ready" incluem:
+
+* [ ] **Segurança:** Implementar Autenticação/Autorização (OAuth2/OIDC) com Keycloak.
+* [ ] **CI/CD:** Pipeline de Github Actions para testes, linter (golangci-lint) e build de imagem.
+* [ ] **Kubernetes:** Criar Helm Charts para deploy orquestrado (com HPA configurado nas métricas de CPU/RabbitMQ).
+* [ ] **Testes de Carga:** Script k6 para validar o comportamento do Circuit Breaker sob stress.
+* [ ] **Idempotência:** Garantir que o processamento de eventos seja idempotente utilizando Redis para dedup de chaves.
 
 ---
 
