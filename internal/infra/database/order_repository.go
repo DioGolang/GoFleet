@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/DioGolang/GoFleet/internal/domain/entity"
+	"github.com/google/uuid"
 )
 
 type OrderRepositoryImpl struct {
@@ -36,6 +37,21 @@ func (r *OrderRepositoryImpl) Save(order *entity.Order) error {
 		return err
 	}
 	return nil
+}
+
+func (r *OrderRepositoryImpl) SaveOutboxEvent(ctx context.Context, eventID, aggID, eventType string, payload []byte, topic string) error {
+	uid, err := uuid.Parse(eventID)
+	if err != nil {
+		return fmt.Errorf("invalid uuid format for outbox event: %w", err)
+	}
+	return r.CreateOutboxEvent(ctx, CreateOutboxEventParams{
+		ID:            uid,
+		AggregateType: "Order",
+		AggregateID:   aggID,
+		EventType:     eventType,
+		Payload:       payload,
+		Topic:         topic,
+	})
 }
 
 func (r *OrderRepositoryImpl) UpdateStatus(ctx context.Context, id string, status string, driverID string) error {
