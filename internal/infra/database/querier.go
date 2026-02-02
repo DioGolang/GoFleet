@@ -6,12 +6,20 @@ package database
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
 	CreateOrder(ctx context.Context, arg CreateOrderParams) error
+	CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error
+	DeleteOldOutboxEvents(ctx context.Context, interval string) error
+	FetchPendingOutboxEvents(ctx context.Context, limit int32) ([]FetchPendingOutboxEventsRow, error)
 	GetOrder(ctx context.Context, id string) (Order, error)
 	ListOrders(ctx context.Context) ([]ListOrdersRow, error)
+	MarkOutboxAsFailed(ctx context.Context, arg MarkOutboxAsFailedParams) error
+	MarkOutboxAsProcessing(ctx context.Context, id uuid.UUID) error
+	MarkOutboxAsPublished(ctx context.Context, id uuid.UUID) error
 	UpdateOrderStatus(ctx context.Context, arg UpdateOrderStatusParams) error
 }
 

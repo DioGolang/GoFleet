@@ -6,6 +6,10 @@ package database
 
 import (
 	"database/sql"
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 type Order struct {
@@ -15,4 +19,19 @@ type Order struct {
 	FinalPrice string         `json:"final_price"`
 	Status     string         `json:"status"`
 	DriverID   sql.NullString `json:"driver_id"`
+}
+
+type Outbox struct {
+	ID            uuid.UUID       `json:"id"`
+	AggregateType string          `json:"aggregate_type"`
+	AggregateID   string          `json:"aggregate_id"`
+	EventType     string          `json:"event_type"`
+	Payload       json.RawMessage `json:"payload"`
+	Topic         string          `json:"topic"`
+	Status        string          `json:"status"`
+	RetryCount    int32           `json:"retry_count"`
+	ErrorMsg      sql.NullString  `json:"error_msg"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+	PublishedAt   sql.NullTime    `json:"published_at"`
 }
