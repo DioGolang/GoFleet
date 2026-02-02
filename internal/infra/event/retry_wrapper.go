@@ -21,7 +21,7 @@ func WrapExponentialBackoff(
 		var err error
 		for attempt := 0; attempt <= maxRetries; attempt++ {
 			err = next(ctx, msg)
-			if err != nil {
+			if err == nil {
 				return nil
 			}
 			if attempt < maxRetries {
