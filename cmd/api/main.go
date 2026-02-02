@@ -47,7 +47,9 @@ func main() {
 	}
 	defer shutdownOtel()
 
+	// =========================================================================
 	// METRICS
+	// =========================================================================
 	reg := prometheus.NewRegistry()
 	prometheusMetrics := metrics.NewPrometheusMetrics(reg, config.OtelServiceName)
 
@@ -60,7 +62,9 @@ func main() {
 		}
 	}()
 
+	// =========================================================================
 	//LOG
+	// =========================================================================
 	zapLogger := logger.NewZapLogger(config.OtelServiceName, false)
 	fail := func(msg string, err error) {
 		zapLogger.Error(ctx, msg, logger.WithError(err))
@@ -68,7 +72,9 @@ func main() {
 	}
 	zapLogger.Info(ctx, "Application starting")
 
+	// =========================================================================
 	// DATABASE (PostgreSQL)
+	// =========================================================================
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		config.DBHost, config.DBPort, config.DBUser, config.DBPassword, config.DBName)
 	db, err := sql.Open(config.DBDriver, dsn)
@@ -86,7 +92,9 @@ func main() {
 		}
 	}(db)
 
+	// =========================================================================
 	// MESSAGING (RabbitMQ)
+	// =========================================================================
 	rabbitURL := fmt.Sprintf("amqp://guest:guest@%s:%s/", config.RabbitMQHost, config.AMQPort)
 	conn, err := amqp.Dial(rabbitURL)
 	if err != nil {
