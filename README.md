@@ -164,6 +164,18 @@ erDiagram
 
 ```
 
+### 3. Controle de Concorrência e Integridade do Aggregate
+
+Em um ambiente de alta escala, múltiplos processos podem tentar modificar o mesmo Aggregate (Pedido) simultaneamente (ex: um evento de "Cancelar" compete com um de "Despachar").
+
+O sistema garante a consistência através de:
+
+1.  **State Pattern como Guardião:**
+    A lógica de domínio em memória atua como primeira barreira. Se um Worker carregar um pedido que já está `CANCELLED` e tentar executar `Dispatch()`, a Entidade retorna erro de regra de negócio imediatamente, abortando a transação antes da escrita.
+
+2.  **Transações ACID:**
+    Todas as mutações de estado e persistência de eventos (Outbox) ocorrem dentro de uma transação isolada do PostgreSQL, garantindo que a visão do agregado seja consistente durante a operação.
+
 ---
 
 ## 🛡️ Engenharia de Resiliência e Confiabilidade
@@ -210,6 +222,26 @@ Se o serviço dependente (`Fleet Service`) estiver indisponível, o Circuit Brea
 * **Sony Gobreaker:** Interrompe chamadas ao Fleet Service após 60% de falha, evitando efeito cascata.
 * **Exponential Backoff:** Retentativas inteligentes (1s, 2s, 4s) para falhas transientes de rede.
 
+### 4. Semântica de Entrega (At-Least-Once Delivery)
+
+O sistema foi desenhado assumindo que **falhas ocorrerão** após o processamento mas antes da confirmação (ACK).
+
+| Cenário de Falha                                | Comportamento do Sistema                                                                                                                                                                |
+|:------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Worker cai antes do DB Commit**               | RabbitMQ reenvia a mensagem. O novo Worker processa normalmente.                                                                                                                        |
+| **Worker cai APÓS DB Commit, mas ANTES do ACK** | RabbitMQ reenvia a mensagem (At-Least-Once). O novo Worker tenta processar, mas é **bloqueado pelo Redis (Idempotency)** ou pela **Unique Constraint** do banco, enviando apenas o ACK. |
+
+> **Garantia Final:** Nenhuma transição de estado ocorre mais de uma vez, mesmo sob falhas catastróficas do processo.
+
+
+### 5. Backpressure e Controle de Carga
+
+Para evitar que picos de tráfego derrubem os Workers por exaustão de memória (OOM), implementamos um mecanismo estrito de **Backpressure** direto no protocolo AMQP.
+
+* **Prefetch Count (QoS):**
+  O Worker limita a ingestão a **10 mensagens simultâneas** por instância.
+   * *Como funciona:* O RabbitMQ cessa o envio de novas mensagens até que o Worker libere slots enviando `ACKs`.
+   * *Resultado:* O sistema torna-se "elástico". Se o banco de dados ficar lento, o Worker processa mais devagar, o RabbitMQ segura as mensagens na fila, e a API continua aceitando pedidos sem cair.
 
 ---
 
@@ -239,6 +271,23 @@ O diferencial do GoFleet é a correlação total de dados. Um `TraceID` gerado n
 | **Resiliência**    | **Sony Gobreaker**    | Circuit Breaker                        |
 | **Config**         | **Viper**             | Gerenciamento de váriaveis de ambiente |
 | **Tracing**        | **OpenTelemetry**     | Instrumentação manual e automática     |
+
+---
+
+---
+
+## 📈 Service Level Objectives (SLOs)
+
+Mais do que apenas coletar métricas, o GoFleet define objetivos claros de confiabilidade e performance que justificam as decisões arquiteturais (ex: uso de filas e circuit breakers).
+
+| Serviço            | Indicador (SLI)                   | Objetivo (SLO) | Racional                                                                                              |
+|:-------------------|:----------------------------------|:---------------|:------------------------------------------------------------------------------------------------------|
+| **API Service**    | Latência de Ingestão (p95)        | **< 200ms**    | O cliente não deve esperar para "criar" o pedido. A complexidade pesada é delegada ao Worker.         |
+| **API Service**    | Disponibilidade                   | **99.9%**      | A API deve aceitar pedidos mesmo se o RabbitMQ ou Fleet Service estiverem fora (fallback via Outbox). |
+| **Worker Service** | Latência E2E (Create -> Dispatch) | **< 5s**       | Tempo máximo aceitável para o motorista ser alocado após o clique do usuário.                         |
+| **Worker Service** | Taxa de Sucesso                   | **> 99.5%**    | Permite falhas transientes (retries), mas alerta se o Circuit Breaker abrir por muito tempo.          |
+
+> **Nota:** Os dashboards do Grafana foram desenhados para monitorar a "saúde" desses SLOs, e não apenas consumo de CPU/Memória.
 
 ---
 
