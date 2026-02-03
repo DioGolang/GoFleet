@@ -228,27 +228,6 @@ Para evitar exaustão de memória (OOM) sob picos de tráfego:
 * **Worker Pool:** Concorrência controlada via número fixo de Goroutines (ex: 10 workers).
 * **Prefetch Count (QoS):** O RabbitMQ só envia mensagens se o Worker tiver capacidade (`WorkerCount * 2`), garantindo que a aplicação nunca aceite mais trabalho do que pode processar.
 
----
-
-### 1. Idempotência (Deduplicação com Decorator)
-
-Implementamos um **Idempotency Guard** usando o padrão Decorator.
-
-* **Estratégia:** Prioriza o cabeçalho `x-event-id` (vindo do Outbox) como chave única.
-* **Mecanismo:** Usa `Redis SETNX` para obter um lock atômico com TTL de 24h.
-* **Segurança (Fail-Closed):** Se o Redis estiver indisponível, o worker rejeita a mensagem (Nack) preventivamente para evitar processamento duplicado acidental.
-
-### 2. Fallback e Degradação Graciosa
-
-Se o `Fleet Service` cair, o pedido não fica preso em loops infinitos. O sistema captura o erro do Circuit Breaker e move o pedido para o estado `MANUAL_DISPATCH`, permitindo que a operação continue manualmente.
-
-### 3. Backpressure e Controle de Carga
-
-Para evitar exaustão de memória (OOM) sob picos de tráfego:
-
-* **Worker Pool:** Concorrência controlada via número fixo de Goroutines (ex: 10 workers).
-* **Prefetch Count (QoS):** O RabbitMQ só envia mensagens se o Worker tiver capacidade (`WorkerCount * 2`), garantindo que a aplicação nunca aceite mais trabalho do que pode processar.
-
 
 ### 4. Semântica de Entrega (At-Least-Once Delivery)
 
