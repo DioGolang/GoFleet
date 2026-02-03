@@ -48,4 +48,4 @@ WHERE status IN ('PUBLISHED', 'FAILED')
 UPDATE outbox
 SET status = 'PENDING', error_msg = 'stuck_recovery'
 WHERE status = 'PROCESSING'
-  AND updated_at < NOW() - @interval::interval;
+  AND updated_at < NOW() - (sqlc.arg(interval)::text)::interval;
