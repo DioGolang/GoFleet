@@ -142,7 +142,7 @@ func main() {
 	}()
 
 	go func() {
-		relay.RunCleaner(ctx)
+		go relay.RunRescuer(ctx)
 	}()
 
 	// =========================================================================
