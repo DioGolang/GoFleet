@@ -149,7 +149,7 @@ func main() {
 		}
 	}(conn)
 
-	dispatchUseCase := order.NewDispatchUseCase(ctx, repository)
+	dispatchUseCase := order.NewDispatchUseCase(repository)
 	dispatchUseCaseWithMetrics := &order.DispatchOrderMetricsDecorator{
 		Next:    dispatchUseCase,
 		Metrics: promMetrics,
