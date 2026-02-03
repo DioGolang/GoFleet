@@ -23,7 +23,7 @@ FOR UPDATE SKIP LOCKED;
 -- name: MarkOutboxAsProcessing :exec
 UPDATE outbox
 SET status = 'PROCESSING', updated_at = NOW()
-WHERE id = $1;
+WHERE id = ANY(@ids::uuid[]);
 
 -- name: MarkOutboxAsPublished :exec
 UPDATE outbox
@@ -43,3 +43,9 @@ DELETE FROM outbox
 WHERE status IN ('PUBLISHED', 'FAILED')
   -- O cast ::text força o SQLC a gerar o argumento como string no Go
   AND created_at < NOW() - (sqlc.arg(interval)::text)::interval;
+
+-- name: ResetStuckEvents :exec
+UPDATE outbox_events
+SET status = 'pending', error_msg = 'stuck_recovery'
+WHERE status = 'processing'
+  AND updated_at < NOW() - @interval::interval;
