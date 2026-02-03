@@ -33,24 +33,25 @@ Este diagrama ilustra como os serviços interagem com a infraestrutura.
 ```mermaid
 graph TD
     User[Cliente HTTP] -->|POST /orders| API[🚢 API Service]
-    
-    subgraph Infrastructure
-        DB[(PostgreSQL)]
-        MQ[RabbitMQ]
-        Redis[(Redis Geo)]
-    end
 
-    subgraph Microservices
-        API -->|1. Persiste Pedido| DB
-        API -->|2. Publica Evento| MQ
-        
-        Worker[👷 Worker Service] -->|3. Consome| MQ
-        Worker -->|6. Atualiza Status| DB
-        
-        Fleet[📍 Fleet Service] -->|5. GeoSearch| Redis
-    end
+subgraph Infrastructure
+DB[(PostgreSQL)]
+MQ[RabbitMQ]
+Redis[(Redis Cache/Geo)]
+end
 
-    Worker -->|4. gRPC SearchDriver| Fleet
+subgraph Microservices
+API -->|1. Persiste Pedido| DB
+API -->|2. Publica Evento| MQ
+
+Worker[👷 Worker Service] -->|3. Consome| MQ
+Worker -->|4. Check Idempotência| Redis
+Worker -->|7. Atualiza Status| DB
+
+Fleet[📍 Fleet Service] -->|6. GeoSearch| Redis
+end
+
+Worker -->|5. gRPC SearchDriver| Fleet
 
 ```
 
@@ -75,7 +76,7 @@ sequenceDiagram
     deactivate API
 
     Note over API,RabbitMQ: Outbox Relay (Background Process)
-    API->>DB: Fetch Pending Events
+    API->>DB: Fetch Pending (SKIP LOCKED)
     API->>RabbitMQ: Publish (orders.created)
     API->>DB: Mark as Published
 
@@ -84,16 +85,21 @@ sequenceDiagram
     RabbitMQ->>Worker: Consume Message
     activate Worker
     Worker->>Worker: Extract Tracing Context
-    
-    Worker->>Fleet: gRPC SearchDriver(OrderID)
-    activate Fleet
-    Fleet->>Redis: GEOSEARCH (Radius 5km)
-    Redis-->>Fleet: Driver Found
-    Fleet-->>Worker: Driver Details
-    deactivate Fleet
+    Worker->>Redis: Check Idempotency (SETNX)
 
-    Worker->>DB: UPDATE Order (DISPATCHED)
-    Worker-->>RabbitMQ: ACK
+    alt Nova Mensagem (Lock Adquirido)
+        Worker->>Fleet: gRPC SearchDriver(OrderID)
+        activate Fleet
+        Fleet->>Redis: GEOSEARCH (Radius 5km)
+        Redis-->>Fleet: Driver Found
+        Fleet-->>Worker: Driver Details
+        deactivate Fleet
+
+        Worker->>DB: UPDATE Order (DISPATCHED)
+        Worker-->>RabbitMQ: ACK
+    else Mensagem Duplicada
+        Worker-->>RabbitMQ: ACK (Descarte Silencioso)
+    end
     deactivate Worker
 
 ```
@@ -203,24 +209,46 @@ Fallback --> Manual[⚠️ Update DB: MANUAL_DISPATCH]
 
 ```
 
-### 1. Idempotência (Deduplicação)
+### 1. Idempotência (Deduplicação com Decorator)
 
-Para garantir a semântica *Exactly-Once Processing* em cima do RabbitMQ (que garante *At-Least-Once*), implementamos um **Idempotency Guard** com Redis.
+Implementamos um **Idempotency Guard** usando o padrão Decorator.
 
-* **Como funciona:** Antes de processar, geramos um hash SHA-256 do payload e tentamos um `SETNX` no Redis.
-* **Resultado:** Se a chave já existir, a mensagem é duplicada e descartada silenciosamente (Ack), protegendo o banco de dados de escritas redundantes.
+* **Estratégia:** Prioriza o cabeçalho `x-event-id` (vindo do Outbox) como chave única.
+* **Mecanismo:** Usa `Redis SETNX` para obter um lock atômico com TTL de 24h.
+* **Segurança (Fail-Closed):** Se o Redis estiver indisponível, o worker rejeita a mensagem (Nack) preventivamente para evitar processamento duplicado acidental.
 
 ### 2. Fallback e Degradação Graciosa
 
-Se o serviço dependente (`Fleet Service`) estiver indisponível, o Circuit Breaker abre. Em vez de rejeitar a mensagem e travar a fila com infinitos retries (*Poison Message*), o sistema aplica uma estratégia de **Fallback de Negócio**:
+Se o `Fleet Service` cair, o pedido não fica preso em loops infinitos. O sistema captura o erro do Circuit Breaker e move o pedido para o estado `MANUAL_DISPATCH`, permitindo que a operação continue manualmente.
 
-* **Ação:** O pedido é capturado e movido para o estado `MANUAL_DISPATCH`.
-* **Benefício:** O cliente não fica "preso" e a operação pode despachar o pedido manualmente, garantindo continuidade de negócio mesmo com falha na infraestrutura.
+### 3. Backpressure e Controle de Carga
 
-### 3. Circuit Breaker & Backoff
+Para evitar exaustão de memória (OOM) sob picos de tráfego:
 
-* **Sony Gobreaker:** Interrompe chamadas ao Fleet Service após 60% de falha, evitando efeito cascata.
-* **Exponential Backoff:** Retentativas inteligentes (1s, 2s, 4s) para falhas transientes de rede.
+* **Worker Pool:** Concorrência controlada via número fixo de Goroutines (ex: 10 workers).
+* **Prefetch Count (QoS):** O RabbitMQ só envia mensagens se o Worker tiver capacidade (`WorkerCount * 2`), garantindo que a aplicação nunca aceite mais trabalho do que pode processar.
+
+---
+
+### 1. Idempotência (Deduplicação com Decorator)
+
+Implementamos um **Idempotency Guard** usando o padrão Decorator.
+
+* **Estratégia:** Prioriza o cabeçalho `x-event-id` (vindo do Outbox) como chave única.
+* **Mecanismo:** Usa `Redis SETNX` para obter um lock atômico com TTL de 24h.
+* **Segurança (Fail-Closed):** Se o Redis estiver indisponível, o worker rejeita a mensagem (Nack) preventivamente para evitar processamento duplicado acidental.
+
+### 2. Fallback e Degradação Graciosa
+
+Se o `Fleet Service` cair, o pedido não fica preso em loops infinitos. O sistema captura o erro do Circuit Breaker e move o pedido para o estado `MANUAL_DISPATCH`, permitindo que a operação continue manualmente.
+
+### 3. Backpressure e Controle de Carga
+
+Para evitar exaustão de memória (OOM) sob picos de tráfego:
+
+* **Worker Pool:** Concorrência controlada via número fixo de Goroutines (ex: 10 workers).
+* **Prefetch Count (QoS):** O RabbitMQ só envia mensagens se o Worker tiver capacidade (`WorkerCount * 2`), garantindo que a aplicação nunca aceite mais trabalho do que pode processar.
+
 
 ### 4. Semântica de Entrega (At-Least-Once Delivery)
 
@@ -342,35 +370,28 @@ docker exec -it gofleet_db psql -U root -d gofleet -c "SELECT * FROM orders;"
 
 ## 🧠 Padrões de Código (Staff Engineer View)
 
-Explicação de decisões técnicas encontradas no código fonte:
+Decisões técnicas de alto nível implementadas no código para garantir manutenibilidade e escala:
 
-### 1. Decorator Pattern para Métricas
+### 1. Idempotency Decorator (Middleware)
 
-Local: `internal/application/usecase/order/create_metrics.go`
+* **Local:** `pkg/event/middleware.go`
+* **Conceito:** Separação total entre infraestrutura (Redis) e regra de negócio. O Handler não sabe que está sendo deduplicado. Isso facilita testes unitários (basta mockar a interface `RedisIdempotencyStore`) e mantém o princípio de Responsabilidade Única (SRP).
 
-* **Por quê?** Separa a lógica de negócio (Use Case) da instrumentação.
-* **Como?** O `CreateOrderMetricsDecorator` "envolve" o Use Case real. Ele mede o tempo de execução e incrementa contadores no Prometheus sem sujar a regra de negócio.
+### 2. Database Locking Strategy (Outbox)
 
-### 2. State Pattern
+* **Local:** `internal/infra/database/queries/outbox.sql`
+* **Conceito:** Uso de `FOR UPDATE SKIP LOCKED` no Postgres.
+* **Por quê?** Permite escalar o *Outbox Relay* horizontalmente (múltiplas réplicas da API) sem gerar *Race Conditions*. Cada instância pega um lote único de eventos para despachar.
 
-Local: `internal/domain/entity/states.go`
+### 3. Worker Pool & Graceful Shutdown
 
-* **Por quê?** Evita condicionais complexas (`if status == "PENDING"`) e garante transições seguras.
-* **Como?** Cada estado (Pending, Dispatched, Delivered) é uma struct que implementa a interface `OrderState`. Tentar entregar um pedido cancelado retorna erro automaticamente.
+* **Local:** `internal/infra/event/consumer.go`
+* **Conceito:** Uso de `sync.WaitGroup` e canais de sinalização. Quando o Kubernetes envia um `SIGTERM`, o serviço para de aceitar novas mensagens, mas aguarda os workers terminarem o processamento atual antes de desligar, evitando perda de dados em memória.
 
-### 3. Interface Segregation (Ports & Adapters)
+### 4. Propagação de Contexto (Tracing)
 
-Local: `internal/application/port`
-
-* **Por quê?** O domínio não conhece o banco de dados ou gRPC.
-* **Como?** Os Use Cases dependem de interfaces (`OrderRepository`, `LocationRepository`). As implementações concretas (Postgres, Redis) estão na camada de `infra`.
-
-### 4. Propagação de Contexto (Distributed Tracing)
-
-Local: `internal/infra/event/consumer.go`
-
-* **Por quê?** Não perder o rastro da requisição quando ela entra na fila.
-* **Como?** Extraímos o `traceparent` dos headers da mensagem AMQP e injetamos no `context.Context` do Go. Isso liga o Span do `produtor` (API) ao Span do `consumidor` (Worker).
+* **Local:** `internal/infra/event/consumer.go`
+* **Conceito:** Extração manual do header `traceparent` do AMQP e injeção no `context.Context` do Go. Isso garante que o Trace ID gerado na API HTTP apareça nos logs do Worker e nas chamadas ao Redis.
 
 ---
 
@@ -435,12 +456,15 @@ O sistema segue a metodologia **12-Factor App**, externalizando configurações 
 
 Este projeto é um laboratório vivo. Os próximos passos para atingir o nível "Production Ready" incluem:
 
-* [ ] **Segurança:** Implementar Autenticação/Autorização (OAuth2/OIDC) com Keycloak.
-* [ ] **CI/CD:** Pipeline de Github Actions para testes, linter (golangci-lint) e build de imagem.
-* [ ] **Kubernetes:** Criar Helm Charts para deploy orquestrado (com HPA configurado nas métricas de CPU/RabbitMQ).
-* [ ] **Testes de Carga:** Script k6 para validar o comportamento do Circuit Breaker sob stress.
-* [ ] **Idempotência:** Garantir que o processamento de eventos seja idempotente utilizando Redis para dedup de chaves.
+## 🔮 Roadmap
 
+* [x] **Idempotência:** Implementada com Redis (`SETNX`) e padrão Decorator.
+* [x] **Resiliência:** Circuit Breaker, Retries e Fallback Strategy implementados.
+* [x] **Observabilidade:** Rastreamento distribuído (OTel) conectado entre microserviços.
+* [ ] **Segurança:** Implementar Autenticação (OAuth2/OIDC) com Keycloak.
+* [ ] **CI/CD:** Pipeline de Github Actions para lint, test e build.
+* [ ] **Kubernetes:** Helm Charts para deploy orquestrado (HPA).
+* [ ] **Testes de Carga:** Script k6 para validar o Circuit Breaker sob stress.
 ---
 
 **Autoria:** Desenvolvido como referência para arquiteturas Go Modernas.
