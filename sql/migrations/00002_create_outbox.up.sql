@@ -5,14 +5,15 @@ CREATE TABLE outbox (
                         event_type     VARCHAR(255) NOT NULL, -- ex: "OrderCreated"
                         payload        JSONB NOT NULL,        -- O evento em si
                         topic          VARCHAR(255) NOT NULL, -- Routing Key do RabbitMQ
-                        status       VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING, PROCESSING, PUBLISHED, FAILED
+                        status       VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                        CONSTRAINT outbox_status_check
+                            CHECK (status IN('PENDING', 'PROCESSING', 'PUBLISHED', 'FAILED')),
                         retry_count  INT NOT NULL DEFAULT 0,
                         error_msg    TEXT,
                         created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
                         updated_at   TIMESTAMP NOT NULL DEFAULT NOW(),
                         published_at TIMESTAMP
 );
-
 CREATE INDEX idx_outbox_pending_processing
     ON outbox(created_at)
     WHERE status IN ('PENDING', 'PROCESSING');
