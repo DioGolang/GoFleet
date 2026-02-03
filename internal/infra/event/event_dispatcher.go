@@ -66,12 +66,18 @@ func (ed *Dispatcher) Dispatch(ctx context.Context, event events.Event) error {
 	return nil
 }
 
-func (ed *Dispatcher) DispatchRaw(ctx context.Context, routingKey string, payload []byte) error {
-	headers := make(amqp.Table)
-	otel.GetTextMapPropagator().Inject(ctx, carrier.AMQPHeadersCarrier(headers))
+// DispatchRaw agora aceita 'headers map[string]string' para satisfazer a interface
+func (ed *Dispatcher) DispatchRaw(ctx context.Context, routingKey string, payload []byte, headers map[string]string) error {
+
+	amqpHeaders := make(amqp.Table)
+	otel.GetTextMapPropagator().Inject(ctx, carrier.AMQPHeadersCarrier(amqpHeaders))
+	for k, v := range headers {
+		amqpHeaders[k] = v
+	}
 
 	ed.Logger.Debug(ctx, "Relaying event from outbox",
 		logger.String("routing_key", routingKey),
+		logger.Any("headers", amqpHeaders),
 	)
 
 	err := ed.RabbitMQChannel.PublishWithContext(
@@ -81,10 +87,11 @@ func (ed *Dispatcher) DispatchRaw(ctx context.Context, routingKey string, payloa
 		false,
 		false,
 		amqp.Publishing{
-			Headers:     headers,
-			ContentType: "application/json",
-			Timestamp:   time.Now(),
-			Body:        payload,
+			Headers:      amqpHeaders,
+			ContentType:  "application/json",
+			Timestamp:    time.Now(),
+			Body:         payload,
+			DeliveryMode: amqp.Persistent,
 		})
 
 	if err != nil {
