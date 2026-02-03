@@ -4,12 +4,13 @@ INSERT INTO outbox (
     aggregate_type,
     aggregate_id,
     event_type,
-    event_version, -- 🆕
+    event_version,   -- ✅ Mantido
     payload,
     topic,
+    tracing_context, -- ✅ Adicionado
     status
 ) VALUES (
-             $1, $2, $3, $4, $5, $6, $7, 'PENDING'
+             $1, $2, $3, $4, $5, $6, $7, $8, 'PENDING'
          );
 
 -- name: FetchPendingOutboxEvents :many
@@ -37,6 +38,7 @@ error_msg = $2,
 retry_count = retry_count + 1,
 updated_at = NOW()
 WHERE id = $1;
+
 
 -- name: DeleteOldOutboxEvents :exec
 DELETE FROM outbox
