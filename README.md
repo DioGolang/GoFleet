@@ -102,7 +102,11 @@ sequenceDiagram
 
 ## 🧩 Modelagem e Dados
 
-### Diagrama de Máquina de Estados (Lifecycle do Pedido)
+Além da infraestrutura, o GoFleet utiliza modelagem rica para garantir a integridade das regras de negócio e a consistência dos dados distribuídos.
+
+### Ciclo de Vida do Pedido (State Machine)
+
+O domínio garante transições válidas via **State**, enquanto o banco de dados atua como última linha de defesa através de **CHECK constraints**, evitando estados inválidos mesmo em cenários de falha.”
 
 Para evitar estados inválidos e garantir a segurança das transições (ex: um pedido cancelado não pode ser entregue), utilizamos o **State Pattern**. O diagrama abaixo ilustra a máquina de estados finita implementada no domínio:
 
@@ -131,7 +135,7 @@ stateDiagram-v2
 
 ```
 
-### Diagrama Entidade-Relacionamento (ER)
+### Consistência Eventual (Transactional Outbox)
 
 Para resolver o problema de escrita dual (Dual Write) em sistemas distribuídos, não publicamos mensagens diretamente na fila. Em vez disso, persistimos o evento na mesma transação do banco de dados, garantindo atomicidade.
 
@@ -162,40 +166,49 @@ erDiagram
 
 ---
 
-## 🛡️ Engenharia de Resiliência
+## 🛡️ Engenharia de Resiliência e Confiabilidade
 
-Este projeto implementa padrões robustos para lidar com falhas em sistemas distribuídos, localizados principalmente no `cmd/worker`.
+O GoFleet implementa uma estratégia de defesa em profundidade (*Defense in Depth*) no `Worker Service`, combinando padrões para garantir consistência e alta disponibilidade.
 
-### Estratégia de Defesa do Worker
+### Pipeline de Processamento (Middleware Chain)
+
+O diagrama abaixo ilustra a ordem exata das camadas de proteção aplicadas a cada mensagem recebida
 
 ```mermaid
-graph LR
-    Queue[RabbitMQ] -->|Msg| Retry[🔄 Exponential Backoff]
-    Retry --> Circuit[⚡ Circuit Breaker]
-    Circuit --> Handler[Process Order]
-    Handler -->|gRPC Call| FleetService
+flowchart TD
+   Queue[RabbitMQ] --> Backoff[1️⃣ Exponential Backoff]
+   Backoff --> Idemp{2️⃣ Redis Idempotency}
 
-    style Circuit fill:#f9f,stroke:#333,stroke-width:2px
-    style Retry fill:#bbf,stroke:#333,stroke-width:2px
+   Idemp -- Key Exists --> AckDiscard[🗑️ Discard & ACK]
+Idemp -- New Key --> CB{3️⃣ Circuit Breaker}
+
+CB -- Closed (OK) --> Grpc[🚀 Call Fleet Service]
+CB -- Open (Fail) --> Fallback[🛡️ Execute Fallback]
+
+Grpc --> Success[✅ Update DB: DISPATCHED]
+Fallback --> Manual[⚠️ Update DB: MANUAL_DISPATCH]
+
 
 ```
 
-1. **Circuit Breaker (Gobreaker):**
-* Protege o `Fleet Service` de ser sobrecarregado caso comece a falhar.
-* Configuração: Abre o circuito após falha de 60% das requisições (min 10 requests).
+### 1. Idempotência (Deduplicação)
 
+Para garantir a semântica *Exactly-Once Processing* em cima do RabbitMQ (que garante *At-Least-Once*), implementamos um **Idempotency Guard** com Redis.
 
-2. **Exponential Backoff:**
-* Se o processamento falhar (ex: erro transiente de rede), o sistema tenta novamente 3 vezes, aumentando o tempo de espera exponencialmente (1s, 2s, 4s).
+* **Como funciona:** Antes de processar, geramos um hash SHA-256 do payload e tentamos um `SETNX` no Redis.
+* **Resultado:** Se a chave já existir, a mensagem é duplicada e descartada silenciosamente (Ack), protegendo o banco de dados de escritas redundantes.
 
+### 2. Fallback e Degradação Graciosa
 
-3. **Dead Letter Queues (DLQ):**
-* Mensagens que excedem as tentativas são enviadas para uma fila de "Wait" ou "Parking" para análise manual, garantindo que nenhum pedido seja perdido.
+Se o serviço dependente (`Fleet Service`) estiver indisponível, o Circuit Breaker abre. Em vez de rejeitar a mensagem e travar a fila com infinitos retries (*Poison Message*), o sistema aplica uma estratégia de **Fallback de Negócio**:
 
+* **Ação:** O pedido é capturado e movido para o estado `MANUAL_DISPATCH`.
+* **Benefício:** O cliente não fica "preso" e a operação pode despachar o pedido manualmente, garantindo continuidade de negócio mesmo com falha na infraestrutura.
 
-4. **Graceful Shutdown:**
-* Todos os serviços interceptam sinais de `SIGTERM` para fechar conexões com DB e RabbitMQ e terminar requisições em andamento antes de encerrar.
+### 3. Circuit Breaker & Backoff
 
+* **Sony Gobreaker:** Interrompe chamadas ao Fleet Service após 60% de falha, evitando efeito cascata.
+* **Exponential Backoff:** Retentativas inteligentes (1s, 2s, 4s) para falhas transientes de rede.
 
 
 ---
