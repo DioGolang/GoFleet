@@ -10,7 +10,7 @@ CREATE TABLE outbox (
                         CONSTRAINT outbox_status_check
                             CHECK (status IN('PENDING', 'PROCESSING', 'PUBLISHED', 'FAILED')),
                         retry_count  INT NOT NULL DEFAULT 0,
-                        tracing_context JSONB,
+                        tracing_context JSONB NOT NULL DEFAULT '{}'::jsonb,
                         error_msg    TEXT,
                         created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
                         updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
