@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/DioGolang/GoFleet/internal/domain/entity"
+	"github.com/DioGolang/GoFleet/pkg/otel"
 	"github.com/google/uuid"
 )
 
@@ -44,14 +45,18 @@ func (r *OrderRepositoryImpl) SaveOutboxEvent(ctx context.Context, eventID, aggI
 	if err != nil {
 		return fmt.Errorf("invalid uuid format for outbox event: %w", err)
 	}
+
+	traceJSON := otel.ExtractContextToJSON(ctx)
+
 	return r.CreateOutboxEvent(ctx, CreateOutboxEventParams{
-		ID:            uid,
-		AggregateType: "Order",
-		AggregateID:   aggID,
-		EventType:     eventType,
-		EventVersion:  eventVersion,
-		Payload:       payload,
-		Topic:         topic,
+		ID:             uid,
+		AggregateType:  "Order",
+		AggregateID:    aggID,
+		EventType:      eventType,
+		EventVersion:   eventVersion,
+		Payload:        payload,
+		Topic:          topic,
+		TracingContext: traceJSON,
 	})
 }
 
