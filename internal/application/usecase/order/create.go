@@ -47,7 +47,7 @@ func (uc *CreateUseCaseImpl) Execute(ctx context.Context, input CreateInput) (Cr
 	err = uc.UoW.Do(ctx, func(provider outbound.RepositoryProvider) error {
 		repo := provider.Order()
 
-		if err := repo.Save(order); err != nil {
+		if err := repo.Save(ctx, order); err != nil {
 			return err
 		}
 

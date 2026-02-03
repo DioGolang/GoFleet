@@ -19,13 +19,13 @@ func NewOrderRepository(db *sql.DB) *OrderRepositoryImpl {
 	return &OrderRepositoryImpl{Db: db, Queries: New(db)}
 }
 
-func (r *OrderRepositoryImpl) Save(order *entity.Order) error {
+func (r *OrderRepositoryImpl) Save(ctx context.Context, order *entity.Order) error {
 
 	priceStr := fmt.Sprintf("%.2f", order.Price())
 	taxStr := fmt.Sprintf("%.2f", order.Tax())
 	finalPriceStr := fmt.Sprintf("%.2f", order.FinalPrice())
 
-	err := r.CreateOrder(context.Background(), CreateOrderParams{
+	err := r.CreateOrder(ctx, CreateOrderParams{
 		ID:         order.ID(),
 		Price:      priceStr,
 		Tax:        taxStr,
