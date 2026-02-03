@@ -17,10 +17,10 @@ func WrapExponentialBackoff(
 	baseWait time.Duration,
 	next MessageHandler,
 ) MessageHandler {
-	return func(ctx context.Context, msg []byte) error {
+	return func(ctx context.Context, msg []byte, headers map[string]interface{}) error {
 		var err error
 		for attempt := 0; attempt <= maxRetries; attempt++ {
-			err = next(ctx, msg)
+			err = next(ctx, msg, headers)
 			if err == nil {
 				return nil
 			}
