@@ -4,17 +4,17 @@ INSERT INTO outbox (
     aggregate_type,
     aggregate_id,
     event_type,
-    event_version,   -- ✅ Mantido
+    event_version,
     payload,
     topic,
-    tracing_context, -- ✅ Adicionado
+    tracing_context,
     status
 ) VALUES (
              $1, $2, $3, $4, $5, $6, $7, $8, 'PENDING'
          );
 
 -- name: FetchPendingOutboxEvents :many
-SELECT id, event_type, aggregate_id, event_version, payload, topic
+SELECT id, event_type, aggregate_id, event_version, payload, topic, tracing_context
 FROM outbox
 WHERE status = 'PENDING'
 ORDER BY created_at ASC
