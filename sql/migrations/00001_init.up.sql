@@ -3,7 +3,9 @@ CREATE TABLE orders (
     price DECIMAL(10,2) NOT NULL,
     tax DECIMAL(10,2) NOT NULL,
     final_price DECIMAL(10,2) NOT NULL,
-    status      VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+    CONSTRAINT orders_status_check
+        CHECK (status IN ('PENDING', 'DISPATCHED', 'MANUAL_DISPATCH', 'DELIVERED', 'CANCELLED')),
     driver_id   VARCHAR(255)
 );
 
