@@ -10,12 +10,11 @@ import (
 
 func ExtractContextToJSON(ctx context.Context) []byte {
 	carrier := propagation.MapCarrier{}
-
 	otel.GetTextMapPropagator().Inject(ctx, carrier)
 
 	b, err := json.Marshal(carrier)
 	if err != nil {
-		return nil
+		return []byte("{}")
 	}
 	return b
 }
