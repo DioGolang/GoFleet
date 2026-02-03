@@ -99,6 +99,8 @@ func (o *Order) Dispatch(driverID string) error {
 	return o.state.Dispatch(o, driverID)
 }
 
+func (o *Order) SendToManual() error { return o.state.SendToManual(o) }
+
 func (o *Order) Deliver() error {
 	return o.state.Deliver(o)
 }
@@ -117,6 +119,8 @@ func ParseState(statusName string) (OrderState, error) {
 		return &PendingState{}, nil
 	case "DISPATCHED":
 		return &DispatchedState{}, nil
+	case "MANUAL_DISPATCH":
+		return &ManualDispatchState{}, nil
 	case "DELIVERED":
 		return &DeliveredState{}, nil
 	case "CANCELLED":
