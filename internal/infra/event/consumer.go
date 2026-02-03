@@ -88,13 +88,40 @@ func (c *Consumer) Start(queueName string, handler MessageHandler) error {
 			err := handler(ctx, d.Body)
 
 			if err != nil {
-				if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, context.DeadlineExceeded) {
-					c.Logger.Warn(ctx, "Resilience trigger: retrying message", logger.WithError(err))
-					d.Nack(false, true)
-				} else {
-					c.Logger.Error(ctx, "Fatal handler error: discarding message", logger.WithError(err))
-					d.Nack(false, false)
+				// CENÁRIO 1: Falha de Dependência (Circuit Breaker Aberto)
+				// (Mover para Manual).
+				if errors.Is(err, gobreaker.ErrOpenState) {
+					c.Logger.Warn(ctx, "Circuit Open! Executing Fallback Strategy...", logger.WithError(err))
+
+					if fallbackErr := c.executeFallback(ctx, d.Body); fallbackErr == nil {
+						// SUCESSO NO FALLBACK:
+						// O pedido foi salvo como MANUAL_DISPATCH.
+						// ACK para tirar da fila e parar de processar.
+						c.Logger.Info(ctx, "Fallback executed successfully. Order moved to manual dispatch.")
+						d.Ack(false)
+						return
+					} else {
+						// FALHA NO FALLBACK:
+						// Se até salvar no banco falhou, não temos escolha.
+						// Nack + Requeue para tentar de novo mais tarde.
+						c.Logger.Error(ctx, "Fallback failed too", logger.WithError(fallbackErr))
+						d.Nack(false, true)
+						return
+					}
 				}
+
+				// CENÁRIO 2: Erros Transientes (Timeout, Rede)
+				// Vale a pena tentar de novo em alguns segundos.
+				if errors.Is(err, context.DeadlineExceeded) {
+					c.Logger.Warn(ctx, "Transient failure (Timeout): retrying message", logger.WithError(err))
+					d.Nack(false, true)
+					return
+				}
+
+				// CENÁRIO 3: Erros Fatais (Dados inválidos, Regra de Domínio)
+				// Descartamos a mensagem para não travar a fila (Poison Message).
+				c.Logger.Error(ctx, "Fatal handler error: discarding message", logger.WithError(err))
+				d.Nack(false, false)
 			}
 			span.End()
 		}
@@ -198,6 +225,33 @@ func (c *Consumer) getRetryCount(msg amqp.Delivery) int64 {
 		}
 	}
 	return 0
+}
+
+func (c *Consumer) executeFallback(ctx context.Context, msg []byte) error {
+	var dto order.CreateInput
+	if err := json.Unmarshal(msg, &dto); err != nil {
+		return fmt.Errorf("fallback unmarshal error: %w", err)
+	}
+
+	orderEntity, err := c.OrderRepository.FindByID(ctx, dto.ID)
+	if err != nil {
+		return fmt.Errorf("fallback find order error: %w", err)
+	}
+
+	if err := orderEntity.SendToManual(); err != nil {
+		return fmt.Errorf("fallback domain transition error: %w", err)
+	}
+
+	err = c.OrderRepository.UpdateStatus(
+		ctx,
+		orderEntity.ID(),
+		orderEntity.StatusName(), // "MANUAL_DISPATCH"
+		orderEntity.DriverID(),
+	)
+	if err != nil {
+		return fmt.Errorf("fallback save error: %w", err)
+	}
+	return nil
 }
 
 func (c *Consumer) publishToParking(ch *amqp.Channel, originalQueue string, msg amqp.Delivery) error {
