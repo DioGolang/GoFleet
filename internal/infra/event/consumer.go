@@ -50,6 +50,14 @@ func (c *Consumer) Start(queueName string, handler MessageHandler) error {
 	}
 	defer ch.Close()
 
+	if err := ch.Qos(
+		10,
+		0,
+		false,
+	); err != nil {
+		return fmt.Errorf("failed to set qos: %w", err)
+	}
+
 	if err := c.setupTopology(ch, queueName); err != nil {
 		return fmt.Errorf("error when configuring topology: %w", err)
 	}
