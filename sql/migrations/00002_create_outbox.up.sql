@@ -3,6 +3,7 @@ CREATE TABLE outbox (
                         aggregate_type VARCHAR(255) NOT NULL, -- ex: "Order"
                         aggregate_id   VARCHAR(255) NOT NULL, -- ex: order_id
                         event_type     VARCHAR(255) NOT NULL, -- ex: "OrderCreated"
+                        event_version  INT NOT NULL DEFAULT 1,
                         payload        JSONB NOT NULL,        -- O evento em si
                         topic          VARCHAR(255) NOT NULL, -- Routing Key do RabbitMQ
                         status       VARCHAR(20) NOT NULL DEFAULT 'PENDING',
