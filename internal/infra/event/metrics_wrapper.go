@@ -16,14 +16,14 @@ func WrapResilientConsumer(
 	cb *gobreaker.CircuitBreaker,
 	next MessageHandler,
 ) MessageHandler {
-	return func(ctx context.Context, msg []byte) error {
+	return func(ctx context.Context, msg []byte, headers map[string]interface{}) error {
 		start := time.Now()
 
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
 		_, err := cb.Execute(func() (interface{}, error) {
-			return nil, next(ctx, msg)
+			return nil, next(ctx, msg, headers)
 		})
 
 		if errors.Is(err, gobreaker.ErrOpenState) {
