@@ -13,7 +13,7 @@ INSERT INTO outbox (
          );
 
 -- name: FetchPendingOutboxEvents :many
-SELECT id, event_type, payload, topic
+SELECT id, event_type, aggregate_id, event_version, payload, topic
 FROM outbox
 WHERE status = 'PENDING'
 ORDER BY created_at ASC
