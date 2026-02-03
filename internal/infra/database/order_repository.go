@@ -39,7 +39,7 @@ func (r *OrderRepositoryImpl) Save(ctx context.Context, order *entity.Order) err
 	return nil
 }
 
-func (r *OrderRepositoryImpl) SaveOutboxEvent(ctx context.Context, eventID, aggID, eventType string, payload []byte, topic string) error {
+func (r *OrderRepositoryImpl) SaveOutboxEvent(ctx context.Context, eventID, aggID, eventType string, eventVersion int32, payload []byte, topic string) error {
 	uid, err := uuid.Parse(eventID)
 	if err != nil {
 		return fmt.Errorf("invalid uuid format for outbox event: %w", err)
@@ -49,6 +49,7 @@ func (r *OrderRepositoryImpl) SaveOutboxEvent(ctx context.Context, eventID, aggI
 		AggregateType: "Order",
 		AggregateID:   aggID,
 		EventType:     eventType,
+		EventVersion:  eventVersion,
 		Payload:       payload,
 		Topic:         topic,
 	})
