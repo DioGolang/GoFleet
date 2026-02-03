@@ -61,6 +61,7 @@ func (uc *CreateUseCaseImpl) Execute(ctx context.Context, input CreateInput) (Cr
 			uuid.New().String(),
 			order.ID(),
 			uc.OrderCreated.GetName(),
+			1,
 			payloadBytes,
 			"orders.created",
 		)
