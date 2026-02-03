@@ -45,7 +45,7 @@ WHERE status IN ('PUBLISHED', 'FAILED')
   AND created_at < NOW() - (sqlc.arg(interval)::text)::interval;
 
 -- name: ResetStuckEvents :exec
-UPDATE outbox_events
-SET status = 'pending', error_msg = 'stuck_recovery'
-WHERE status = 'processing'
+UPDATE outbox
+SET status = 'PENDING', error_msg = 'stuck_recovery'
+WHERE status = 'PROCESSING'
   AND updated_at < NOW() - @interval::interval;
