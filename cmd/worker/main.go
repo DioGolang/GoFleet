@@ -9,6 +9,7 @@ import (
 	"github.com/DioGolang/GoFleet/pkg/logger"
 	"github.com/DioGolang/GoFleet/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 	"github.com/sony/gobreaker"
 
 	"log"
@@ -56,6 +57,25 @@ func main() {
 	//Metrics
 	reg := prometheus.NewRegistry()
 	promMetrics := metrics.NewPrometheusMetrics(reg, config.OtelServiceName)
+
+	//REDIS
+	rdb := redis.NewClient(&redis.Options{
+		Addr:         fmt.Sprintf("%s:%s", config.RedisHost, config.RedisPort),
+		MinIdleConns: 10,
+		PoolSize:     50,
+	})
+	ctxBackground, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := rdb.Ping(ctxBackground).Err(); err != nil {
+		zapLogger.Error(ctx, "Failed to connect to Redis", logger.WithError(err))
+		fail("Redis connection failed", err)
+	}
+	cancel()
+
+	defer func() {
+		if err := rdb.Close(); err != nil {
+			zapLogger.Error(ctx, "Error closing Redis", logger.WithError(err))
+		}
+	}()
 
 	// Postgres Connection
 	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -148,6 +168,14 @@ func main() {
 		handlerStack,
 	)
 
+	handlerStack = event.WrapIdempotency(
+		zapLogger,
+		rdb,
+		"WorkerProcessOrder",
+		24*time.Hour,
+		handlerStack,
+	)
+
 	handlerStack = event.WrapExponentialBackoff(
 		zapLogger,
 		promMetrics,
@@ -176,8 +204,8 @@ func main() {
 	}
 
 	//
-	_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	_, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
 
 	zapLogger.Info(ctx, "Worker exited")
 }
