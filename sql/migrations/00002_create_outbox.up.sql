@@ -11,14 +11,22 @@ CREATE TABLE outbox (
                             CHECK (status IN('PENDING', 'PROCESSING', 'PUBLISHED', 'FAILED')),
                         retry_count  INT NOT NULL DEFAULT 0,
                         error_msg    TEXT,
-                        created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-                        updated_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-                        published_at TIMESTAMP
+                        created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                        updated_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                        published_at TIMESTAMP WITH TIME ZONE
 );
-CREATE INDEX idx_outbox_pending_processing
+
+CREATE INDEX idx_outbox_fetch_pending
     ON outbox(created_at)
-    WHERE status IN ('PENDING', 'PROCESSING');
+    WHERE status = 'PENDING';
+
+CREATE INDEX idx_outbox_rescue_processing
+    ON outbox(updated_at)
+    WHERE status = 'PROCESSING';
 
 CREATE INDEX idx_outbox_cleanup
-    ON outbox(status, created_at)
+    ON outbox(created_at)
     WHERE status IN ('PUBLISHED', 'FAILED');
+
+CREATE INDEX idx_outbox_aggregate
+    ON outbox(aggregate_type, aggregate_id);
