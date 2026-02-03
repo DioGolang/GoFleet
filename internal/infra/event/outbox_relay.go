@@ -9,6 +9,7 @@ import (
 	"github.com/DioGolang/GoFleet/internal/infra/database"
 	"github.com/DioGolang/GoFleet/pkg/events"
 	"github.com/DioGolang/GoFleet/pkg/logger"
+	"github.com/DioGolang/GoFleet/pkg/otel"
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 )
@@ -107,7 +108,9 @@ func (r *OutboxRelay) fetchAndClaim(ctx context.Context) ([]database.FetchPendin
 }
 
 func (r *OutboxRelay) processSingleEvent(ctx context.Context, evt database.FetchPendingOutboxEventsRow) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	traceCtx := otel.InjectContextFromJSON(ctx, evt.TracingContext)
+
+	ctxWithTimeout, cancel := context.WithTimeout(traceCtx, 5*time.Second)
 	defer cancel()
 
 	versionStr := strconv.FormatInt(int64(evt.EventVersion), 10)
@@ -117,7 +120,7 @@ func (r *OutboxRelay) processSingleEvent(ctx context.Context, evt database.Fetch
 		"x-aggregate-id":  evt.AggregateID,
 	}
 
-	err := r.dispatcher.DispatchRaw(ctx, evt.Topic, evt.Payload, headers)
+	err := r.dispatcher.DispatchRaw(ctxWithTimeout, evt.Topic, evt.Payload, headers)
 
 	// FASE 3: Atualização de Estado
 	if err != nil {
