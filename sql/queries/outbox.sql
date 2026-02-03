@@ -1,9 +1,16 @@
 -- name: CreateOutboxEvent :exec
 INSERT INTO outbox (
-id, aggregate_type, aggregate_id, event_type, payload, topic, status
+    id,
+    aggregate_type,
+    aggregate_id,
+    event_type,
+    event_version, -- 🆕
+    payload,
+    topic,
+    status
 ) VALUES (
-$1, $2, $3, $4, $5, $6, 'PENDING'
-);
+             $1, $2, $3, $4, $5, $6, $7, 'PENDING'
+         );
 
 -- name: FetchPendingOutboxEvents :many
 SELECT id, event_type, payload, topic
