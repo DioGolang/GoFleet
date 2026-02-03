@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/DioGolang/GoFleet/internal/application/usecase/order"
+	"github.com/DioGolang/GoFleet/internal/infra/storage"
 	"github.com/DioGolang/GoFleet/pkg/logger"
 	"github.com/DioGolang/GoFleet/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
@@ -156,7 +157,7 @@ func main() {
 	}
 
 	// Consumer Logic
-	consumer := event.NewConsumer(conn, grpcClient, repository, dispatchUseCaseWithMetrics, zapLogger)
+	consumer := event.NewConsumer(conn, grpcClient, repository, dispatchUseCaseWithMetrics, rdb, zapLogger, 10)
 
 	handlerStack := consumer.ProcessOrder
 
@@ -168,9 +169,11 @@ func main() {
 		handlerStack,
 	)
 
+	redisStore := storage.NewRedisAdapter(rdb)
+	
 	handlerStack = event.WrapIdempotency(
 		zapLogger,
-		rdb,
+		redisStore,
 		"WorkerProcessOrder",
 		24*time.Hour,
 		handlerStack,
@@ -189,7 +192,7 @@ func main() {
 	errChan := make(chan error, 1)
 	go func() {
 		zapLogger.Info(ctx, "Starting consumer loop", logger.String("queue", "orders.created"))
-		if err := consumer.Start("orders.created", handlerStack); err != nil {
+		if err := consumer.Start(ctx, "orders.created", handlerStack); err != nil {
 			zapLogger.Error(ctx, "Consumer failed", logger.WithError(err))
 			errChan <- err
 		}
