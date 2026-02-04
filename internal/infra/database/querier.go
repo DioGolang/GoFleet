@@ -18,8 +18,9 @@ type Querier interface {
 	GetOrder(ctx context.Context, id string) (Order, error)
 	ListOrders(ctx context.Context) ([]ListOrdersRow, error)
 	MarkOutboxAsFailed(ctx context.Context, arg MarkOutboxAsFailedParams) error
-	MarkOutboxAsProcessing(ctx context.Context, id uuid.UUID) error
+	MarkOutboxAsProcessing(ctx context.Context, ids []uuid.UUID) error
 	MarkOutboxAsPublished(ctx context.Context, id uuid.UUID) error
+	ResetStuckEvents(ctx context.Context, interval string) error
 	UpdateOrderStatus(ctx context.Context, arg UpdateOrderStatusParams) error
 }
 

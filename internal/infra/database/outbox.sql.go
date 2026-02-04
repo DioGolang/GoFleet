@@ -11,23 +11,34 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 const createOutboxEvent = `-- name: CreateOutboxEvent :exec
 INSERT INTO outbox (
-id, aggregate_type, aggregate_id, event_type, payload, topic, status
+    id,
+    aggregate_type,
+    aggregate_id,
+    event_type,
+    event_version,
+    payload,
+    topic,
+    tracing_context,
+    status
 ) VALUES (
-$1, $2, $3, $4, $5, $6, 'PENDING'
-)
+             $1, $2, $3, $4, $5, $6, $7, $8, 'PENDING'
+         )
 `
 
 type CreateOutboxEventParams struct {
-	ID            uuid.UUID       `json:"id"`
-	AggregateType string          `json:"aggregate_type"`
-	AggregateID   string          `json:"aggregate_id"`
-	EventType     string          `json:"event_type"`
-	Payload       json.RawMessage `json:"payload"`
-	Topic         string          `json:"topic"`
+	ID             uuid.UUID       `json:"id"`
+	AggregateType  string          `json:"aggregate_type"`
+	AggregateID    string          `json:"aggregate_id"`
+	EventType      string          `json:"event_type"`
+	EventVersion   int32           `json:"event_version"`
+	Payload        json.RawMessage `json:"payload"`
+	Topic          string          `json:"topic"`
+	TracingContext json.RawMessage `json:"tracing_context"`
 }
 
 func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) error {
@@ -36,8 +47,10 @@ func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventPa
 		arg.AggregateType,
 		arg.AggregateID,
 		arg.EventType,
+		arg.EventVersion,
 		arg.Payload,
 		arg.Topic,
+		arg.TracingContext,
 	)
 	return err
 }
@@ -55,7 +68,7 @@ func (q *Queries) DeleteOldOutboxEvents(ctx context.Context, interval string) er
 }
 
 const fetchPendingOutboxEvents = `-- name: FetchPendingOutboxEvents :many
-SELECT id, event_type, payload, topic
+SELECT id, event_type, aggregate_id, event_version, payload, topic, tracing_context
 FROM outbox
 WHERE status = 'PENDING'
 ORDER BY created_at ASC
@@ -64,10 +77,13 @@ FOR UPDATE SKIP LOCKED
 `
 
 type FetchPendingOutboxEventsRow struct {
-	ID        uuid.UUID       `json:"id"`
-	EventType string          `json:"event_type"`
-	Payload   json.RawMessage `json:"payload"`
-	Topic     string          `json:"topic"`
+	ID             uuid.UUID       `json:"id"`
+	EventType      string          `json:"event_type"`
+	AggregateID    string          `json:"aggregate_id"`
+	EventVersion   int32           `json:"event_version"`
+	Payload        json.RawMessage `json:"payload"`
+	Topic          string          `json:"topic"`
+	TracingContext json.RawMessage `json:"tracing_context"`
 }
 
 func (q *Queries) FetchPendingOutboxEvents(ctx context.Context, limit int32) ([]FetchPendingOutboxEventsRow, error) {
@@ -82,8 +98,11 @@ func (q *Queries) FetchPendingOutboxEvents(ctx context.Context, limit int32) ([]
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
+			&i.AggregateID,
+			&i.EventVersion,
 			&i.Payload,
 			&i.Topic,
+			&i.TracingContext,
 		); err != nil {
 			return nil, err
 		}
@@ -120,11 +139,11 @@ func (q *Queries) MarkOutboxAsFailed(ctx context.Context, arg MarkOutboxAsFailed
 const markOutboxAsProcessing = `-- name: MarkOutboxAsProcessing :exec
 UPDATE outbox
 SET status = 'PROCESSING', updated_at = NOW()
-WHERE id = $1
+WHERE id = ANY($1::uuid[])
 `
 
-func (q *Queries) MarkOutboxAsProcessing(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, markOutboxAsProcessing, id)
+func (q *Queries) MarkOutboxAsProcessing(ctx context.Context, ids []uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, markOutboxAsProcessing, pq.Array(ids))
 	return err
 }
 
@@ -136,5 +155,17 @@ WHERE id = $1
 
 func (q *Queries) MarkOutboxAsPublished(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.ExecContext(ctx, markOutboxAsPublished, id)
+	return err
+}
+
+const resetStuckEvents = `-- name: ResetStuckEvents :exec
+UPDATE outbox
+SET status = 'PENDING', error_msg = 'stuck_recovery'
+WHERE status = 'PROCESSING'
+  AND updated_at < NOW() - ($1::text)::interval
+`
+
+func (q *Queries) ResetStuckEvents(ctx context.Context, interval string) error {
+	_, err := q.db.ExecContext(ctx, resetStuckEvents, interval)
 	return err
 }

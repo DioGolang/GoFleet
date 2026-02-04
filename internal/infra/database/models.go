@@ -22,16 +22,18 @@ type Order struct {
 }
 
 type Outbox struct {
-	ID            uuid.UUID       `json:"id"`
-	AggregateType string          `json:"aggregate_type"`
-	AggregateID   string          `json:"aggregate_id"`
-	EventType     string          `json:"event_type"`
-	Payload       json.RawMessage `json:"payload"`
-	Topic         string          `json:"topic"`
-	Status        string          `json:"status"`
-	RetryCount    int32           `json:"retry_count"`
-	ErrorMsg      sql.NullString  `json:"error_msg"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
-	PublishedAt   sql.NullTime    `json:"published_at"`
+	ID             uuid.UUID       `json:"id"`
+	AggregateType  string          `json:"aggregate_type"`
+	AggregateID    string          `json:"aggregate_id"`
+	EventType      string          `json:"event_type"`
+	EventVersion   int32           `json:"event_version"`
+	Payload        json.RawMessage `json:"payload"`
+	Topic          string          `json:"topic"`
+	Status         string          `json:"status"`
+	RetryCount     int32           `json:"retry_count"`
+	TracingContext json.RawMessage `json:"tracing_context"`
+	ErrorMsg       sql.NullString  `json:"error_msg"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+	PublishedAt    sql.NullTime    `json:"published_at"`
 }
