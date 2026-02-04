@@ -68,17 +68,20 @@ func (ed *Dispatcher) Dispatch(ctx context.Context, event events.Event) error {
 
 // DispatchRaw agora aceita 'headers map[string]string' para satisfazer a interface
 func (ed *Dispatcher) DispatchRaw(ctx context.Context, routingKey string, payload []byte, headers map[string]string) error {
-
 	amqpHeaders := make(amqp.Table)
-	otel.GetTextMapPropagator().Inject(ctx, carrier.AMQPHeadersCarrier(amqpHeaders))
+
 	for k, v := range headers {
 		amqpHeaders[k] = v
 	}
 
-	ed.Logger.Debug(ctx, "Relaying event from outbox",
-		logger.String("routing_key", routingKey),
-		logger.Any("headers", amqpHeaders),
-	)
+	otel.GetTextMapPropagator().Inject(ctx, carrier.AMQPHeadersCarrier(amqpHeaders))
+
+	ed.Logger.Debug(ctx, "Dispatching with headers", logger.Any("headers", amqpHeaders))
+
+	msgID := ""
+	if v, ok := headers["x-event-id"]; ok {
+		msgID = v
+	}
 
 	err := ed.RabbitMQChannel.PublishWithContext(
 		ctx,
@@ -90,19 +93,12 @@ func (ed *Dispatcher) DispatchRaw(ctx context.Context, routingKey string, payloa
 			Headers:      amqpHeaders,
 			ContentType:  "application/json",
 			Timestamp:    time.Now(),
-			Body:         payload,
+			MessageId:    msgID,
 			DeliveryMode: amqp.Persistent,
+			Body:         payload,
 		})
 
-	if err != nil {
-		ed.Logger.Error(ctx, "Failed to relay message to RabbitMQ",
-			logger.String("routing_key", routingKey),
-			logger.WithError(err),
-		)
-		return err
-	}
-
-	return nil
+	return err
 }
 
 func (ed *Dispatcher) Register(eventName string, handler events.EventHandler) error { return nil }
