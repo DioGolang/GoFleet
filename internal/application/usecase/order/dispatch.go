@@ -22,8 +22,6 @@ func (uc *DispatchUseCaseImpl) Execute(ctx context.Context, input DispatchInput)
 		return fmt.Errorf("order not found: %w", err)
 	}
 
-	fmt.Printf(order.StatusName())
-
 	if err := order.Dispatch(input.DriverID); err != nil {
 		return fmt.Errorf("domain rule violation: %w", err)
 	}
