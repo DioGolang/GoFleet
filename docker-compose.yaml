@@ -129,6 +129,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      jaeger:
+        condition: service_started
     restart: on-failure
     healthcheck:
       test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8000/health" ]
