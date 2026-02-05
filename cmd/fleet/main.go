@@ -3,14 +3,17 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/DioGolang/GoFleet/internal/infra/database"
-	"github.com/DioGolang/GoFleet/pkg/logger"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/DioGolang/GoFleet/internal/infra/database"
+	"github.com/DioGolang/GoFleet/internal/infra/web/handler"
+	"github.com/DioGolang/GoFleet/pkg/logger"
 
 	"github.com/DioGolang/GoFleet/configs"
 	"github.com/DioGolang/GoFleet/internal/infra/grpc/pb"
@@ -69,6 +72,27 @@ func main() {
 	// Service & Seeding
 	fleetService := service.NewFleetService(locationRepo, zapLogger)
 	setupSeedData(ctx, fleetService)
+
+	// =========================================================================
+	// MONITORING SERVER (Embedded Management Port)
+	// =========================================================================
+	go func() {
+		mux := http.NewServeMux()
+
+		h := handler.NewHealthHandler(
+			config.OtelServiceName,
+			handler.WithRedis(rdb),
+		)
+
+		mux.Handle("/health", h)
+
+		// mux.Handle("/metrics", promhttp.Handler())
+
+		zapLogger.Info(ctx, "Monitoring server running on :2112")
+		if err := http.ListenAndServe(":2112", mux); err != nil {
+			zapLogger.Error(ctx, "Monitoring server failed", logger.WithError(err))
+		}
+	}()
 
 	// gRPC Server com Interceptor OTel
 	lis, err := net.Listen("tcp", ":"+config.FleetPort)
