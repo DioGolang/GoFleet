@@ -194,7 +194,7 @@ O diagrama abaixo ilustra a ordem exata das camadas de proteção aplicadas a ca
 
 ```mermaid
 flowchart TD
-   Queue[RabbitMQ] --> Backoff[1️⃣ Exponential Backoff]
+   Queue[RabbitMQ] --> Backoff[1️⃣ Exponential Backoff + Jitter]
    Backoff --> Idemp{2️⃣ Redis Idempotency}
 
    Idemp -- Key Exists --> AckDiscard[🗑️ Discard & ACK]
@@ -223,11 +223,13 @@ Se o `Fleet Service` cair, o pedido não fica preso em loops infinitos. O sistem
 
 ### 3. Backpressure e Controle de Carga
 
-Para evitar exaustão de memória (OOM) sob picos de tráfego:
+Para evitar que picos de tráfego derrubem os Workers por exaustão de memória (OOM), implementamos um mecanismo estrito de **Backpressure** direto no protocolo AMQP.
 
-* **Worker Pool:** Concorrência controlada via número fixo de Goroutines (ex: 10 workers).
-* **Prefetch Count (QoS):** O RabbitMQ só envia mensagens se o Worker tiver capacidade (`WorkerCount * 2`), garantindo que a aplicação nunca aceite mais trabalho do que pode processar.
-
+* **Prefetch Count (QoS):**
+  O Worker limita a ingestão a **10 mensagens simultâneas** por instância.
+    * *Como funciona:* O RabbitMQ cessa o envio de novas mensagens até que o Worker libere slots enviando `ACKs`.
+    * *Resultado:* O sistema torna-se "elástico". Se o banco de dados ficar lento, o Worker processa mais devagar, o RabbitMQ segura as mensagens na fila, e a API continua aceitando pedidos sem cair.
+    * *Prefetch Count (QoS):* O RabbitMQ só envia mensagens se o Worker tiver capacidade (WorkerCount * 2), garantindo que a aplicação nunca aceite mais trabalho do que pode processar.
 
 ### 4. Semântica de Entrega (At-Least-Once Delivery)
 
@@ -241,15 +243,10 @@ O sistema foi desenhado assumindo que **falhas ocorrerão** após o processament
 > **Garantia Final:** Nenhuma transição de estado ocorre mais de uma vez, mesmo sob falhas catastróficas do processo.
 
 
-### 5. Backpressure e Controle de Carga
-
-Para evitar que picos de tráfego derrubem os Workers por exaustão de memória (OOM), implementamos um mecanismo estrito de **Backpressure** direto no protocolo AMQP.
-
-* **Prefetch Count (QoS):**
-  O Worker limita a ingestão a **10 mensagens simultâneas** por instância.
-   * *Como funciona:* O RabbitMQ cessa o envio de novas mensagens até que o Worker libere slots enviando `ACKs`.
-   * *Resultado:* O sistema torna-se "elástico". Se o banco de dados ficar lento, o Worker processa mais devagar, o RabbitMQ segura as mensagens na fila, e a API continua aceitando pedidos sem cair.
-
+### 5. Retry Strategy (Full Jitter)
+* **Local:** `internal/infra/event/retry_wrapper.go`
+* **Conceito:** Implementação do padrão *Full Jitter* (recomendação AWS/Netflix) utilizando a nova lib `math/rand/v2` do Go 1.22+.
+* **Por quê?** Em sistemas distribuídos, retries com intervalos fixos causam o efeito *Thundering Herd* (manada), onde todos os workers batem no banco no mesmo milissegundo após uma recuperação. O Jitter adiciona entropia (aleatoriedade) ao tempo de espera, descorrelacionando as requisições e protegendo a infraestrutura.
 ---
 
 ## 👁️ Observabilidade Completa
@@ -371,6 +368,12 @@ Decisões técnicas de alto nível implementadas no código para garantir manute
 
 * **Local:** `internal/infra/event/consumer.go`
 * **Conceito:** Extração manual do header `traceparent` do AMQP e injeção no `context.Context` do Go. Isso garante que o Trace ID gerado na API HTTP apareça nos logs do Worker e nas chamadas ao Redis.
+
+### 5. Retry Strategy (Full Jitter)
+
+* **Local:** `internal/infra/event/retry_wrapper.go`
+* **Conceito:** Implementação do padrão Full Jitter utilizando math/rand/v2
+* **Por quê?:** Evita o Thundering Herd (efeito manada). Se o banco cair, o Jitter impede que todos os workers tentem reconectar no exato mesmo instante, distribuindo a carga de recuperação suavemente.
 
 ---
 
