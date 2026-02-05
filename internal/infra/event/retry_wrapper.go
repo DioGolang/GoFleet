@@ -3,6 +3,7 @@ package event
 import (
 	"context"
 	"math"
+	"math/rand/v2"
 	"time"
 
 	"github.com/DioGolang/GoFleet/pkg/logger"
@@ -24,17 +25,32 @@ func WrapExponentialBackoff(
 			if err == nil {
 				return nil
 			}
-			if attempt < maxRetries {
-				wait := baseWait * time.Duration(math.Pow(2, float64(attempt)))
 
-				log.Warn(ctx, "Transient failure, retrying...",
+			if attempt < maxRetries {
+				const maxBackoff = 30 * time.Second
+
+				floatWait := float64(baseWait) * math.Pow(2, float64(attempt))
+				calculatedWait := time.Duration(floatWait)
+
+				if calculatedWait > maxBackoff {
+					calculatedWait = maxBackoff
+				}
+
+				jitterWait := rand.N(calculatedWait + 1)
+
+				if jitterWait < 100*time.Millisecond {
+					jitterWait = 100 * time.Millisecond
+				}
+
+				log.Warn(ctx, "Transient failure, retrying with jitter...",
 					logger.String("handler", handlerName),
 					logger.Int("attempt", attempt+1),
-					logger.String("wait", wait.String()),
+					logger.String("wait", jitterWait.String()),
+					logger.String("cap_wait", calculatedWait.String()),
 					logger.WithError(err),
 				)
 
-				timer := time.NewTimer(wait)
+				timer := time.NewTimer(jitterWait)
 				select {
 				case <-timer.C:
 				case <-ctx.Done():
