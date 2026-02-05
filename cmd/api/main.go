@@ -146,6 +146,17 @@ func main() {
 	}()
 
 	// =========================================================================
+	// RATE LIMITER (Defense in Depth)
+	// =========================================================================
+	// Config: 10 req/s, Burst de 20. Limpeza a cada 1 min.
+	rateLimiter := middlewareMetrics.NewRateLimiter(middlewareMetrics.RateLimiterConfig{
+		RequestsPerSecond: 10,
+		Burst:             20,
+		CleanupInterval:   1 * time.Minute,
+		ClientTimeout:     3 * time.Minute,
+	})
+
+	// =========================================================================
 	// DEPENDENCIES & HANDLERS
 	// =========================================================================
 	orderCreated := event.NewOrderCreated()
@@ -160,7 +171,8 @@ func main() {
 	// ROUTER COM OTEL MIDDLEWARE
 	r := chi.NewRouter()
 	r.Use(otelchi.Middleware(config.OtelServiceName, otelchi.WithChiRoutes(r)))
-	//r.Use(middleware.Logger)
+	//r.Use
+	r.Use(rateLimiter.Handler(zapLogger))
 	r.Use(middlewareMetrics.MetricsWrapper(prometheusMetrics))
 	r.Use(middlewareMetrics.RequestLogger(zapLogger))
 	r.Use(middleware.Recoverer)
