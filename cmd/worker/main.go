@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
 
 	"github.com/DioGolang/GoFleet/internal/application/usecase/order"
 	"github.com/DioGolang/GoFleet/internal/infra/storage"
+	"github.com/DioGolang/GoFleet/internal/infra/web/handler"
 	"github.com/DioGolang/GoFleet/pkg/logger"
 	"github.com/DioGolang/GoFleet/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/sony/gobreaker"
 
@@ -156,6 +159,28 @@ func main() {
 		Metrics: promMetrics,
 	}
 
+	//Checks
+	go func() {
+		mux := http.NewServeMux()
+
+		healthHandler := handler.NewHealthHandler(
+			config.OtelServiceName,
+			handler.WithPostgres(db),
+			handler.WithRedis(rdb),
+			handler.WithRabbitMQ(rabbitURL),
+		)
+
+		mux.Handle("/health", healthHandler)
+
+		mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+
+		zapLogger.Info(ctx, "Monitoring server running on :2112")
+
+		if err := http.ListenAndServe(":2112", mux); err != nil {
+			zapLogger.Error(ctx, "Monitoring server failed", logger.WithError(err))
+		}
+	}()
+
 	// Consumer Logic
 	consumer := event.NewConsumer(conn, grpcClient, repository, dispatchUseCaseWithMetrics, rdb, zapLogger, 10)
 
@@ -170,7 +195,7 @@ func main() {
 	)
 
 	redisStore := storage.NewRedisAdapter(rdb)
-	
+
 	handlerStack = event.WrapIdempotency(
 		zapLogger,
 		redisStore,
