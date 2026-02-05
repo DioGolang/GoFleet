@@ -38,19 +38,6 @@ func NewRateLimiter(conf RateLimiterConfig) *IPDispatcher {
 	return d
 }
 
-func (d *IPDispatcher) cleanupLoop() {
-	ticker := time.NewTicker(d.config.CleanupInterval)
-	for range ticker.C {
-		d.mu.Lock()
-		for ip, v := range d.visitors {
-			if time.Since(v.lastSeen) > d.config.ClientTimeout {
-				delete(d.visitors, ip)
-			}
-		}
-		d.mu.Unlock()
-	}
-}
-
 func (d *IPDispatcher) Handler(log logger.Logger) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +61,19 @@ func (d *IPDispatcher) Handler(log logger.Logger) func(next http.Handler) http.H
 			}
 			next.ServeHTTP(w, r)
 		})
+	}
+}
+
+func (d *IPDispatcher) cleanupLoop() {
+	ticker := time.NewTicker(d.config.CleanupInterval)
+	for range ticker.C {
+		d.mu.Lock()
+		for ip, v := range d.visitors {
+			if time.Since(v.lastSeen) > d.config.ClientTimeout {
+				delete(d.visitors, ip)
+			}
+		}
+		d.mu.Unlock()
 	}
 }
 
