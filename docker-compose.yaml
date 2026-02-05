@@ -130,6 +130,11 @@ services:
       rabbitmq:
         condition: service_healthy
     restart: on-failure
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8000/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   fleet:
     build:
@@ -147,10 +152,10 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: "jaeger:4317"
       OTEL_EXPORTER_OTLP_INSECURE: "true"
     healthcheck:
-     test: ["CMD", "nc", "-z", "localhost", "50051"]
-     interval: 5s
-     timeout: 5s
-     retries: 5
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2112/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     depends_on:
       redis:
         condition: service_healthy
@@ -185,6 +190,11 @@ services:
      fleet:
       condition: service_healthy
     restart: on-failure
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:2112/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   postgres_data: {}
