@@ -247,6 +247,15 @@ O sistema foi desenhado assumindo que **falhas ocorrerão** após o processament
 * **Local:** `internal/infra/event/retry_wrapper.go`
 * **Conceito:** Implementação do padrão *Full Jitter* (recomendação AWS/Netflix) utilizando a nova lib `math/rand/v2` do Go 1.22+.
 * **Por quê?** Em sistemas distribuídos, retries com intervalos fixos causam o efeito *Thundering Herd* (manada), onde todos os workers batem no banco no mesmo milissegundo após uma recuperação. O Jitter adiciona entropia (aleatoriedade) ao tempo de espera, descorrelacionando as requisições e protegendo a infraestrutura.
+
+### 6. Rate Limiting (Proteção da API)
+
+Para proteger a API contra abusos e picos repentinos de tráfego (*DDoS* ou clientes mal comportados), implementamos um **Rate Limiter Local** usando o algoritmo **Token Bucket**.
+
+* **Política:** 10 req/s com Burst de 20 requisições por IP.
+* **Mecanismo:** Middleware In-Memory com limpeza automática de visitantes inativos (evita Memory Leaks).
+* **Resultado:** Retorna `429 Too Many Requests` e o header `Retry-After` imediatamente se o limite for excedido, protegendo a aplicação de exaustão de CPU antes de abrir conexão com o banco.
+
 ---
 
 ## 👁️ Observabilidade Completa
@@ -375,6 +384,13 @@ Decisões técnicas de alto nível implementadas no código para garantir manute
 * **Conceito:** Implementação do padrão Full Jitter utilizando math/rand/v2
 * **Por quê?:** Evita o Thundering Herd (efeito manada). Se o banco cair, o Jitter impede que todos os workers tentem reconectar no exato mesmo instante, distribuindo a carga de recuperação suavemente.
 
+### 6. Rate Limiting Strategy (In-Memory vs Distributed)
+* **Local:** `internal/infra/web/middleware/rate_limit.go`
+* **Conceito:** Token Bucket (`golang.org/x/time/rate`) com *Visitor Pattern* e *Cleanup Routine*.
+* **Por quê?** Optamos por **Rate Limit Local** em vez de Distribuído (Redis) para a camada de proteção de infraestrutura.
+    * **Latência Zero:** Não adiciona *network hop* no caminho crítico (Hot Path).
+    * **Isolamento de Falha:** Se o Redis cair, a API não cai junto; ela continua operando e se protegendo individualmente.
+
 ---
 
 ## 📂 Estrutura de Pastas
@@ -441,7 +457,7 @@ Este projeto é um laboratório vivo. Os próximos passos para atingir o nível 
 ## 🔮 Roadmap
 
 * [x] **Idempotência:** Implementada com Redis (`SETNX`) e padrão Decorator.
-* [x] **Resiliência:** Circuit Breaker, Retries e Fallback Strategy implementados.
+* [x] **Resiliência:** Circuit Breaker, Retries (Jitter) e Rate Limiting implementados.
 * [x] **Observabilidade:** Rastreamento distribuído (OTel) conectado entre microserviços.
 * [ ] **Segurança:** Implementar Autenticação (OAuth2/OIDC) com Keycloak.
 * [ ] **CI/CD:** Pipeline de Github Actions para lint, test e build.
