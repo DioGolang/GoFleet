@@ -172,6 +172,16 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(otelchi.Middleware(config.OtelServiceName, otelchi.WithChiRoutes(r)))
 	//r.Use
+
+	//Checks
+	healthHandler := handler.NewHealthHandler(
+		config.OtelServiceName,
+		handler.WithPostgres(db),
+		handler.WithRabbitMQ(rabbitURL),
+	)
+	r.Get("/health", healthHandler.ServeHTTP)
+
+	//API
 	r.Use(rateLimiter.Handler(zapLogger))
 	r.Use(middlewareMetrics.MetricsWrapper(prometheusMetrics))
 	r.Use(middlewareMetrics.RequestLogger(zapLogger))
