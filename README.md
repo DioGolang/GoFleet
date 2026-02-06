@@ -267,23 +267,25 @@ O diferencial do GoFleet é a correlação total de dados. Um `TraceID` gerado n
 * **Tracing:** OpenTelemetry (OTel) -> Jaeger.
 * **Métricas:** Prometheus (exposto em `:2112/metrics`).
 * **Logs:** Zap (JSON Estruturado) com injeção automática de `trace_id` e `span_id` -> Promtail -> Loki.
+* **Health Checks:** Monitoramento ativo de dependências (Postgres, Redis, RabbitMQ) via endpoint `/health` com proteção contra *Connection Storms*.
 * **Visualização:** Grafana unificando tudo.
 
 ---
 
 ## 🛠️ Tecnologias e Bibliotecas
 
-| Categoria          | Tecnologia            | Uso no Projeto                         |
-|--------------------|-----------------------|----------------------------------------|
-| **Linguagem**      | **Go 1.25**           | Core do sistema                        |
-| **Framework HTTP** | **Chi v5**            | Router leve e idiomático               |
-| **Comunicação**    | **gRPC + Protobuf**   | Comunicação interna (Worker -> Fleet)  |
-| **Mensageria**     | **RabbitMQ**          | Desacoplamento de eventos              |
-| **Database**       | **PostgreSQL + SQLC** | Persistência Type-Safe (Sem ORM)       |
-| **Cache/Geo**      | **Redis**             | GeoSpatial Indexing para motoristas    |
-| **Resiliência**    | **Sony Gobreaker**    | Circuit Breaker                        |
-| **Config**         | **Viper**             | Gerenciamento de váriaveis de ambiente |
-| **Tracing**        | **OpenTelemetry**     | Instrumentação manual e automática     |
+| Categoria          | Tecnologia            | Uso no Projeto                           |
+|--------------------|-----------------------|------------------------------------------|
+| **Linguagem**      | **Go 1.25**           | Core do sistema                          |
+| **Framework HTTP** | **Chi v5**            | Router leve e idiomático                 |
+| **Comunicação**    | **gRPC + Protobuf**   | Comunicação interna (Worker -> Fleet)    |
+| **Mensageria**     | **RabbitMQ**          | Desacoplamento de eventos                |
+| **Database**       | **PostgreSQL + SQLC** | Persistência Type-Safe (Sem ORM)         |
+| **Cache/Geo**      | **Redis**             | GeoSpatial Indexing para motoristas      |
+| **Resiliência**    | **Sony Gobreaker**    | Circuit Breaker                          |
+| **Health Check**   | **Health Go**         | Liveness & Readiness Probes padronizados |
+| **Config**         | **Viper**             | Gerenciamento de váriaveis de ambiente   |
+| **Tracing**        | **OpenTelemetry**     | Instrumentação manual e automática       |
 
 ---
 
@@ -329,7 +331,16 @@ make docker-up
 * **RabbitMQ:** [http://localhost:15672](https://www.google.com/search?q=http://localhost:15672) (guest/guest)
 
 
-3. **Realizar um Teste (Criar Pedido):**
+3. **Verificar Saúde da API (Readiness Probe):**
+```bash
+
+curl -v http://localhost:8000/health
+# Resposta esperada: 200 OK com JSON vazio (sucesso silencioso) ou 503 com detalhes de falha.
+
+```
+
+
+4. **Realizar um Teste (Criar Pedido):**
    Utilize o arquivo `orders.http` ou via cURL:
 ```bash
 curl -X POST http://localhost:8000/api/v1/orders \
@@ -339,7 +350,7 @@ curl -X POST http://localhost:8000/api/v1/orders \
 ```
 
 
-4. **Verificar o Fluxo:**
+5. **Verificar o Fluxo:**
 * Verifique se o pedido foi criado no Postgres:
 ```bash
 docker exec -it gofleet_db psql -U root -d gofleet -c "SELECT * FROM orders;"
@@ -385,11 +396,20 @@ Decisões técnicas de alto nível implementadas no código para garantir manute
 * **Por quê?:** Evita o Thundering Herd (efeito manada). Se o banco cair, o Jitter impede que todos os workers tentem reconectar no exato mesmo instante, distribuindo a carga de recuperação suavemente.
 
 ### 6. Rate Limiting Strategy (In-Memory vs Distributed)
+
 * **Local:** `internal/infra/web/middleware/rate_limit.go`
 * **Conceito:** Token Bucket (`golang.org/x/time/rate`) com *Visitor Pattern* e *Cleanup Routine*.
 * **Por quê?** Optamos por **Rate Limit Local** em vez de Distribuído (Redis) para a camada de proteção de infraestrutura.
     * **Latência Zero:** Não adiciona *network hop* no caminho crítico (Hot Path).
     * **Isolamento de Falha:** Se o Redis cair, a API não cai junto; ela continua operando e se protegendo individualmente.
+
+### 7. Health Check Strategy (Dependency Injection)
+
+* **Local:** `internal/infra/web/handler/health.go`
+* **Conceito:** Uso de *Functional Options* combinadas com *Closures* (`func(ctx) error`) para injetar as verificações.
+* **Por quê?** 
+    1. **Desacoplamento:** O handler não depende de drivers específicos (`pgx`, `go-redis`), facilitando testes unitários sem mocks complexos.
+    2. **Performance:** Utilizamos as conexões já abertas da aplicação (`db.PingContext`, `amqp.IsClosed`) em vez de abrir novas conexões a cada check, protegendo a infraestrutura contra *Connection Storms* em momentos de instabilidade.
 
 ---
 
