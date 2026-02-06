@@ -79,12 +79,20 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 
-		h := handler.NewHealthHandler(
-			config.OtelServiceName,
-			handler.WithRedis(rdb),
+		healthHandler, err := handler.NewHealthHandler(
+			handler.WithName(config.OtelServiceName, "1.0.0"),
+
+			handler.WithRedis(func(ctx context.Context) error {
+				return rdb.Ping(ctx).Err()
+			}),
 		)
 
-		mux.Handle("/health", h)
+		if err != nil {
+			zapLogger.Error(ctx, "failed to init health handler", logger.WithError(err))
+			return
+		}
+
+		mux.Handle("/health", healthHandler)
 
 		// mux.Handle("/metrics", promhttp.Handler())
 

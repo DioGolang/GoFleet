@@ -160,15 +160,33 @@ func main() {
 	}
 
 	//Checks
+	//Checks
 	go func() {
 		mux := http.NewServeMux()
 
-		healthHandler := handler.NewHealthHandler(
-			config.OtelServiceName,
-			handler.WithPostgres(db),
-			handler.WithRedis(rdb),
-			handler.WithRabbitMQ(rabbitURL),
+		healthHandler, err := handler.NewHealthHandler(
+			handler.WithName(config.OtelServiceName, "1.0.0"),
+
+			handler.WithPostgres(func(ctx context.Context) error {
+				return db.PingContext(ctx)
+			}),
+
+			handler.WithRedis(func(ctx context.Context) error {
+				return rdb.Ping(ctx).Err()
+			}),
+
+			handler.WithRabbitMQ(func(ctx context.Context) error {
+				if conn.IsClosed() {
+					return fmt.Errorf("rabbitmq connection is closed")
+				}
+				return nil
+			}),
 		)
+
+		if err != nil {
+			zapLogger.Error(ctx, "failed to initialize health check", logger.WithError(err))
+			return
+		}
 
 		mux.Handle("/health", healthHandler)
 

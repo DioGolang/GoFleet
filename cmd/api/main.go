@@ -173,12 +173,39 @@ func main() {
 	r.Use(otelchi.Middleware(config.OtelServiceName, otelchi.WithChiRoutes(r)))
 	//r.Use
 
-	//Checks
-	healthHandler := handler.NewHealthHandler(
-		config.OtelServiceName,
-		handler.WithPostgres(db),
-		handler.WithRabbitMQ(rabbitURL),
+	// =========================================================================
+	// CHECKS (Liveness & Readiness)
+	// =========================================================================
+	healthHandler, err := handler.NewHealthHandler(
+		handler.WithName(config.OtelServiceName, "1.0.0"),
+
+		handler.WithPostgres(func(ctx context.Context) error {
+			zapLogger.Info(ctx, "HEALTH CHECK: Pinging Postgres...")
+			start := time.Now()
+			err := db.PingContext(ctx)
+			zapLogger.Info(ctx, "HEALTH CHECK: Postgres Ping finished",
+				logger.String("duration", time.Since(start).String()),
+				logger.Any("error", err),
+			)
+			return err
+		}),
+
+		handler.WithRabbitMQ(func(ctx context.Context) error {
+			zapLogger.Info(ctx, "HEALTH CHECK: Checking RabbitMQ Connection...")
+			if conn.IsClosed() {
+				return fmt.Errorf("connection closed")
+			}
+			return nil
+		}),
+
+		// handler.WithCheck("fake-failure", 1*time.Second, func(ctx context.Context) error {
+		// 	 return fmt.Errorf("simulated chaos monkey error")
+		// }),
 	)
+
+	if err != nil {
+		fail("health check init failed", err)
+	}
 
 	//API
 	r.Use(rateLimiter.Handler(zapLogger))
