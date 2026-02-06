@@ -2,86 +2,81 @@ package handler
 
 import (
 	"context"
-	"database/sql"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/hellofresh/health-go/v5"
-	healthRabbit "github.com/hellofresh/health-go/v5/checks/rabbitmq"
-	"github.com/redis/go-redis/v9"
 )
 
 type healthOptions struct {
-	checks []*health.Config
+	componentName string
+	version       string
+	checks        []*health.Config
 }
 
 type HealthOption func(*healthOptions)
 
-func WithPostgres(db *sql.DB) HealthOption {
+func WithName(name, version string) HealthOption {
 	return func(o *healthOptions) {
-		if db == nil {
+		o.componentName = name
+		o.version = version
+	}
+}
+
+func WithCheck(name string, timeout time.Duration, checkFunc func(context.Context) error) HealthOption {
+	return func(o *healthOptions) {
+		if checkFunc == nil {
+			fmt.Printf("WARN: Check function for '%s' is nil. Skipping.\n", name)
 			return
 		}
+
 		o.checks = append(o.checks, &health.Config{
-			Name:      "postgres",
-			Timeout:   5 * time.Second,
+			Name:      name,
+			Timeout:   timeout,
 			SkipOnErr: false,
-			Check: func(ctx context.Context) error {
-				return db.PingContext(ctx)
-			},
+			Check:     checkFunc,
 		})
 	}
 }
 
-func WithRedis(rdb *redis.Client) HealthOption {
-	return func(o *healthOptions) {
-		if rdb == nil {
-			return
-		}
-		o.checks = append(o.checks, &health.Config{
-			Name:      "redis",
-			Timeout:   3 * time.Second,
-			SkipOnErr: false,
-			Check: func(ctx context.Context) error {
-				return rdb.Ping(ctx).Err()
-			},
-		})
-	}
+func WithPostgres(checkFunc func(context.Context) error) HealthOption {
+	return WithCheck("postgres", 2*time.Second, checkFunc)
 }
 
-func WithRabbitMQ(dsn string) HealthOption {
-	return func(o *healthOptions) {
-		if dsn == "" {
-			return
-		}
-		o.checks = append(o.checks, &health.Config{
-			Name:      "rabbitmq",
-			Timeout:   3 * time.Second,
-			SkipOnErr: false,
-			Check: healthRabbit.New(healthRabbit.Config{
-				DSN: dsn,
-			}),
-		})
-	}
+func WithRedis(checkFunc func(context.Context) error) HealthOption {
+	return WithCheck("redis", 1*time.Second, checkFunc)
 }
 
-func NewHealthHandler(serviceName string, opts ...HealthOption) http.Handler {
+func WithRabbitMQ(checkFunc func(context.Context) error) HealthOption {
+	return WithCheck("rabbitmq", 1*time.Second, checkFunc)
+}
+
+func NewHealthHandler(opts ...HealthOption) (http.Handler, error) {
 	options := &healthOptions{
-		checks: make([]*health.Config, 0),
+		componentName: "default-service",
+		version:       "0.0.0",
+		checks:        make([]*health.Config, 0),
 	}
 
 	for _, opt := range opts {
 		opt(options)
 	}
 
-	h, _ := health.New(health.WithComponent(health.Component{
-		Name:    serviceName,
-		Version: "1.0.0",
+	h, err := health.New(health.WithComponent(health.Component{
+		Name:    options.componentName,
+		Version: options.version,
 	}))
-
-	for _, check := range options.checks {
-		h.Register(*check)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init health container: %w", err)
 	}
 
-	return h.Handler()
+	for _, check := range options.checks {
+		if err := h.Register(*check); err != nil {
+			fmt.Printf("FAILED! Error: %v\n", err)
+			return nil, fmt.Errorf("failed to register check '%s': %w", check.Name, err)
+		}
+	}
+
+	return h.Handler(), nil
 }
