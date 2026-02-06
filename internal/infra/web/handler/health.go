@@ -73,7 +73,6 @@ func NewHealthHandler(opts ...HealthOption) (http.Handler, error) {
 
 	for _, check := range options.checks {
 		if err := h.Register(*check); err != nil {
-			fmt.Printf("FAILED! Error: %v\n", err)
 			return nil, fmt.Errorf("failed to register check '%s': %w", check.Name, err)
 		}
 	}
